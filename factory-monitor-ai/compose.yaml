@@ -146,6 +146,24 @@ services:
       REDIS_URL: "redis://redis:6379/0"
     restart: unless-stopped
 
+  edge:
+    profiles: ["edge"]
+    build:
+      context: .
+      dockerfile: edge/Dockerfile
+      args:
+        BASE_IMAGE: python:3.11-slim-bookworm
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      EDGE_WEIGHTS: /app/edge/models/yolov8n.pt
+      PPE_WEIGHTS_URL: ${PPE_WEIGHTS_URL:-}
+
 volumes:
   pgdata:
   kafkadata:

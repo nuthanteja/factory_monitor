@@ -1,0 +1,9 @@
+ultralytics==8.3.0
+supervision==0.23.0
+opencv-python-headless==4.10.0.84
+shapely==2.0.4
+pyyaml==6.0.2
+pydantic==2.8.2
+aiokafka==0.11.0
+numpy==1.26.4
+av==12.3.0

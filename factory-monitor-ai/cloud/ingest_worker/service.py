@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -182,6 +185,13 @@ async def create_incident_from_anomaly(
                     tier=0,
                     to_phone_e164=operator.phone_e164,
                     template_name=tier_cfg.template_name,
+                )
+            else:
+                logger.warning(
+                    "tier-0 operator outbox skipped: incident=%s operator_found=%s tier0_config_found=%s",
+                    incident.id,
+                    operator is not None,
+                    tier_cfg is not None,
                 )
 
     except IntegrityError:

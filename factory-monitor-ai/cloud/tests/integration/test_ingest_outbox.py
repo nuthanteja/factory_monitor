@@ -11,6 +11,7 @@ import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
@@ -146,3 +147,37 @@ async def test_tier0_outbox_idempotency_key_is_unique(maker):
 
     assert len(outbox_rows) == 1
     assert outbox_rows[0].idempotency_key == f"{result.incident_id}|0"
+
+
+@pytest.mark.asyncio
+async def test_tier0_outbox_idempotency_key_db_constraint(maker):
+    """DB UNIQUE constraint on idempotency_key must reject a duplicate row at flush time."""
+    event = _make_event(dedup_key=f"cam_dbcon|x|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}")
+    async with maker() as s:
+        result = await create_incident_from_anomaly(
+            s, event, grace_seconds=5, on_call_resolver=resolve
+        )
+        await s.commit()
+
+    assert result.created is True
+    incident_id = result.incident_id
+    duplicate_key = f"{incident_id}|0"
+
+    async with maker() as s:
+        dup = Outbox(
+            id=uuid.uuid4(),
+            incident_id=incident_id,
+            tier=0,
+            to_phone_e164="+15550000001",
+            channel="console",
+            kind="TEMPLATE",
+            template_name="operator_alert_v1",
+            idempotency_key=duplicate_key,
+            status="PENDING",
+            attempts=0,
+            max_attempts=6,
+        )
+        s.add(dup)
+        with pytest.raises(IntegrityError):
+            await s.flush()
+        await s.rollback()

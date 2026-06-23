@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "f1c2d3e4-5678-49ab-8cde-0123456789ab",
+  "anomaly_type": "ppe_no_hardhat",
+  "rule_id": "PPE_NO_HARDHAT",
+  "occurred_at": "2026-06-22T10:15:03.412Z",
+  "site_id": "plant-01",
+  "camera_id": "cam_01",
+  "zone_id": "zone_weld_bay",
+  "track_id": "cam_01:1487",
+  "object_class": "person",
+  "severity": "high",
+  "confidence": 0.91,
+  "dedup_key": "cam_01|cam_01:1487|PPE_NO_HARDHAT|1718446500",
+  "evidence": { "bbox": [880, 412, 130, 348], "snapshot_url": "", "footage_source": "clip_03" },
+  "source": "edge"
+}

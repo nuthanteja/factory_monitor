@@ -1,0 +1,71 @@
+[project]
+name = "factory-monitor-ai"
+version = "0.1.0"
+description = "Factory Monitor AI — edge+cloud anomaly detection and escalation"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "alembic>=1.13",
+    "aiokafka>=0.11",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "testcontainers[kafka,postgresql]>=4.5",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "psycopg2-binary>=2.9",
+]
+api = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+]
+worker = [
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "aiokafka>=0.11",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cloud*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["cloud/tests"]
+addopts = "-ra"
+markers = [
+    "integration: spins up testcontainers (Docker required)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true

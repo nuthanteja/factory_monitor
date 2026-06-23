@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cloud.common.db.models import Incident, IncidentStatus
@@ -88,9 +88,24 @@ async def poll_once(
         incident_id = row[0]
         try:
             async with session_maker() as txn_session:
-                # Re-fetch inside the transition txn so SQLAlchemy ORM state is fresh
-                incident = await txn_session.get(Incident, incident_id)
-                if incident is None:
+                # Per-incident exclusion: claim phase used SKIP LOCKED; here we
+                # FOR UPDATE re-lock the row so the read+transition is atomic w.r.t.
+                # a concurrent Ack/Resolve UPDATE (they cannot interleave between
+                # our read and our write — no cross-transaction row-lock continuity).
+                incident = (
+                    await txn_session.execute(
+                        select(Incident)
+                        .where(Incident.id == incident_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                # Defensive re-check: skip if the incident was closed/changed since
+                # the claim (e.g., operator acknowledged between claim commit and here).
+                if (
+                    incident is None
+                    or incident.status.value not in _ACTIVE_STATUSES
+                    or incident.next_fire_at is None
+                ):
                     continue
                 result: TransitionResult = await fire_transition(txn_session, incident)
                 await txn_session.commit()

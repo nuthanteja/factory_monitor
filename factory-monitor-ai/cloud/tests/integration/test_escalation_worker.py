@@ -197,3 +197,50 @@ async def test_escalation_worker_runs_and_stops(maker):
     async with maker() as s:
         updated = await s.get(Incident, inc.id)
     assert updated.status == IncidentStatus.TIER1
+
+
+@pytest.mark.asyncio
+async def test_poll_once_skips_resolved_incident(maker):
+    """Worker must NOT advance an incident that was resolved/acked between the claim
+    commit and the transition transaction.
+
+    Simulates the ack-clobber race: the incident is seeded as due, then its
+    status is flipped to RESOLVED (next_fire_at=NULL) before poll_once runs,
+    mimicking an operator ACK that landed after the claim window opened but
+    before the transition txn acquired the FOR UPDATE lock.
+    """
+    inc = await _insert_due_incident(maker, IncidentStatus.AWAITING_OPERATOR, 0)
+
+    # Simulate ACK arriving before the worker's transition txn
+    operator_id = uuid.uuid4()
+    async with maker() as s:
+        await s.execute(
+            text(
+                "UPDATE incidents SET status = 'RESOLVED', next_fire_at = NULL, "
+                "resolved_by = :op, resolved_at = now() WHERE id = :id"
+            ),
+            {"op": operator_id, "id": inc.id},
+        )
+        await s.commit()
+
+    processed = await poll_once(maker, worker_id="worker-ack-race", lease_seconds=30, batch=10)
+
+    async with maker() as s:
+        after = await s.get(Incident, inc.id)
+        events = (
+            await s.execute(
+                select(IncidentEvent).where(IncidentEvent.incident_id == inc.id)
+            )
+        ).scalars().all()
+        outbox_rows = (
+            await s.execute(
+                select(Outbox).where(Outbox.incident_id == inc.id)
+            )
+        ).scalars().all()
+
+    # Incident must remain RESOLVED, tier unchanged, no escalation side-effects
+    assert after.status == IncidentStatus.RESOLVED
+    assert after.current_tier == 0
+    assert after.next_fire_at is None
+    assert len(events) == 0, "no audit events should be written for a resolved incident"
+    assert len(outbox_rows) == 0, "no outbox rows should be written for a resolved incident"

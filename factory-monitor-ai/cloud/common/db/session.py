@@ -23,7 +23,22 @@ def session_factory(settings: Settings) -> async_sessionmaker[AsyncSession]:
     )
 
 
+_maker: async_sessionmaker[AsyncSession] | None = None
+
+
+def get_maker() -> async_sessionmaker[AsyncSession]:
+    """Return the module-level cached session maker, creating it on first call."""
+    global _maker
+    if _maker is None:
+        _maker = session_factory(get_settings())
+    return _maker
+
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    maker = session_factory(get_settings())
-    async with maker() as session:
+    """Yield a single AsyncSession from the cached session maker.
+
+    The caller is responsible for commit()/rollback(); the session does not
+    auto-commit.
+    """
+    async with get_maker()() as session:
         yield session

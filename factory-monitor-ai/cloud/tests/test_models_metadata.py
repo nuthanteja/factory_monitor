@@ -53,3 +53,9 @@ def test_incident_events_fk_to_incidents() -> None:
     fks = Base.metadata.tables["incident_events"].foreign_keys
     targets = {fk.column.table.name for fk in fks}
     assert "incidents" in targets
+
+
+def test_partial_index_where_clauses() -> None:
+    idxs = {i.name: i for i in Base.metadata.tables["incidents"].indexes}
+    assert "status IN" in str(idxs["uq_incident_open_dedup"].dialect_kwargs.get("postgresql_where", ""))
+    assert "status IN" in str(idxs["idx_incident_due"].dialect_kwargs.get("postgresql_where", ""))

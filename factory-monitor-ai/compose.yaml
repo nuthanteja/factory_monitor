@@ -67,12 +67,14 @@ services:
       retries: 10
 
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    image: bluenviron/mediamtx:latest-ffmpeg
+    restart: unless-stopped
     ports:
       - "8554:8554"
       - "8889:8889"
     volumes:
-      - ./infra/mediamtx.yml:/mediamtx.yml:ro
+      - ./footage/mediamtx.yml:/mediamtx.yml:ro
+      - ./footage/clips:/footage/clips:ro
 
   migrate:
     image: python:3.11-slim

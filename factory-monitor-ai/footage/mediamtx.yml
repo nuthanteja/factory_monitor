@@ -1,0 +1,15 @@
+# MediaMTX config: publish footage/clips/clip_03.mp4 on a loop as RTSP cam_01.
+# Mounted into bluenviron/mediamtx at /mediamtx.yml; clips at /footage/clips.
+logLevel: info
+logDestinations: [stdout]
+
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+paths:
+  cam_01:
+    runOnInit: >
+      ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4
+      -c copy -f rtsp rtsp://localhost:8554/cam_01
+    runOnInitRestart: yes

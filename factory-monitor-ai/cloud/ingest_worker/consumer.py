@@ -34,6 +34,9 @@ async def handle_message(
         event = AnomalyEvent.model_validate_json(raw_value)
     except (ValidationError, ValueError) as exc:
         logger.warning("malformed anomaly routed to DLQ: %s", exc)
+        # At-least-once: a crash between this DLQ send and the caller's offset
+        # commit can produce a duplicate DLQ record.  Acceptable — the DLQ is
+        # for human triage and idempotency is not required there.
         await producer.send_and_wait(dlq_topic, value=raw_value, key=raw_key)
         return "dlq"
 

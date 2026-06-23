@@ -5,8 +5,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from aiokafka import AIOKafkaProducer
-
+from cloud.common.kafka import make_producer, publish_event
 from cloud.common.schemas.anomaly import AnomalyEvent
 from edge.vision.debounce import DebounceConfig, TrackDebouncer
 from edge.vision.detector import Detection, PpeDetector
@@ -65,15 +64,11 @@ async def amain() -> None:
     weights = os.environ.get("EDGE_WEIGHTS", "edge/models/yolov8n.pt")
     detector = PpeDetector(YOLO(weights))
 
-    producer = AIOKafkaProducer(bootstrap_servers=bootstrap)
-    await producer.start()
+    # Use the hardened producer helper: acks="all" + enable_idempotence=True
+    producer = await make_producer(bootstrap)
 
     async def publish(key: str, ev: AnomalyEvent) -> None:
-        await producer.send_and_wait(
-            TOPIC,
-            key=key.encode("utf-8"),
-            value=ev.model_dump_json().encode("utf-8"),
-        )
+        await publish_event(producer, TOPIC, ev)
 
     engine = VisionEngine(
         cfg,

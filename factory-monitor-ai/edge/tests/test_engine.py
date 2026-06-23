@@ -125,6 +125,55 @@ async def test_engine_skips_compliant_person():
 
 
 @pytest.mark.asyncio
+async def test_engine_checks_all_required_ppe_zones():
+    """Person is in zone_b but NOT zone_a; engine must emit exactly one event for zone_b."""
+    published: list[tuple[str, AnomalyEvent]] = []
+
+    async def publish(key: str, ev: AnomalyEvent) -> None:
+        published.append((key, ev))
+
+    # zone_a: small top-left box that does NOT contain the person's feet (650, 600)
+    # zone_b: right-side box that DOES contain the person's feet (650, 600)
+    cfg_two = CameraConfig(
+        camera_id="cam_01",
+        site_id="plant-01",
+        rtsp_url="rtsp://mediamtx:8554/cam_01",
+        zones=[
+            ZoneConfig(
+                zone_id="zone_a",
+                kind="required_ppe",
+                polygon=[(0, 0), (100, 0), (100, 100), (0, 100)],
+            ),
+            ZoneConfig(
+                zone_id="zone_b",
+                kind="required_ppe",
+                polygon=[(500, 500), (800, 500), (800, 720), (500, 720)],
+            ),
+        ],
+    )
+    # bbox (600, 300, 100, 300) => feet anchor = (650, 600), inside zone_b only
+    viol = Detection("person", (600, 300, 100, 300), 0.91, no_hardhat=True)
+    engine = VisionEngine(
+        cfg_two,
+        detector=_FixedDetector([viol]),
+        tracker=_FakeTracker(),
+        debouncer=TrackDebouncer(
+            DebounceConfig(window=12, m_of_n=8, clear_consecutive=6)
+        ),
+        publish=publish,
+        frame_source=StubFrameSource(
+            [np.zeros((720, 1280, 3), dtype=np.uint8)] * 12
+        ),
+    )
+    count = await engine.run()
+    assert count == 1
+    assert len(published) == 1
+    _, ev = published[0]
+    assert ev.zone_id == "zone_b"
+    assert ev.track_id == "cam_01:1"
+
+
+@pytest.mark.asyncio
 async def test_engine_skips_violation_outside_zone():
     published: list[tuple[str, AnomalyEvent]] = []
 

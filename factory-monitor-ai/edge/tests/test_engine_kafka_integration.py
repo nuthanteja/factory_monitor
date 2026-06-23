@@ -54,13 +54,15 @@ async def test_engine_produces_event_to_real_kafka():
 
         producer = AIOKafkaProducer(
             bootstrap_servers=bootstrap,
-            value_serializer=lambda v: v.encode("utf-8"),
-            key_serializer=lambda k: k.encode("utf-8"),
         )
         await producer.start()
 
         async def publish(key: str, ev: AnomalyEvent) -> None:
-            await producer.send_and_wait(TOPIC, key=key, value=ev.model_dump_json())
+            await producer.send_and_wait(
+                TOPIC,
+                key=key.encode("utf-8"),
+                value=ev.model_dump_json().encode("utf-8"),
+            )
 
         consumer = AIOKafkaConsumer(
             TOPIC,

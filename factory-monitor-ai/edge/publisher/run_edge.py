@@ -43,13 +43,16 @@ class ByteTrackTracker:
             dtype=float,
         )
         conf = np.array([d.confidence for d in detections], dtype=float)
-        class_id = np.array([0 for _ in detections], dtype=int)
+        class_id = np.arange(len(detections), dtype=int)
         sv_dets = sv.Detections(xyxy=xyxy, confidence=conf, class_id=class_id)
         tracked = self._tracker.update_with_detections(sv_dets)
         out: list[tuple[int, Detection]] = []
         for i in range(len(tracked)):
+            if tracked.tracker_id is None or tracked.tracker_id[i] is None:
+                continue
             tid = int(tracked.tracker_id[i])
-            out.append((tid, detections[i]))
+            orig_idx = int(tracked.class_id[i])
+            out.append((tid, detections[orig_idx]))
         return out
 
 

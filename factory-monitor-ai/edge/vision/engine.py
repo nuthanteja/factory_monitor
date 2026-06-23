@@ -9,7 +9,6 @@ import numpy as np
 
 from cloud.common.schemas.anomaly import AnomalyEvent, Evidence
 from edge.vision.debounce import (
-    DebounceConfig,
     DebounceEvent,
     TrackDebouncer,
     point_in_polygon,
@@ -94,7 +93,7 @@ class VisionEngine:
         self.publish = publish
         self.frame_source = frame_source
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.zone = next(z for z in cfg.zones if z.kind == "required_ppe")
+        self.zones = [z for z in cfg.zones if z.kind == "required_ppe"]
 
     async def _emit(self, key: str, ev: AnomalyEvent) -> None:
         result = self.publish(key, ev)
@@ -112,15 +111,17 @@ class VisionEngine:
                 if det.object_class != "person":
                     continue
                 track_id = f"{self.cfg.camera_id}:{raw_id}"
-                inside = point_in_polygon(_bbox_anchor(det.bbox), self.zone.polygon)
-                violating = bool(inside and det.no_hardhat)
-                event: DebounceEvent | None = self.debouncer.observe(
-                    track_id, RULE_ID, violating
-                )
-                if event is not None and event.transition == "open":
-                    anomaly = build_anomaly_event(
-                        self.cfg, self.zone.zone_id, det, track_id, self.clock()
+                for zone in self.zones:
+                    inside = point_in_polygon(_bbox_anchor(det.bbox), zone.polygon)
+                    violating = bool(inside and det.no_hardhat)
+                    debounce_key = f"{track_id}:{zone.zone_id}"
+                    event: DebounceEvent | None = self.debouncer.observe(
+                        debounce_key, RULE_ID, violating
                     )
-                    await self._emit(self.cfg.camera_id, anomaly)
-                    published += 1
+                    if event is not None and event.transition == "open":
+                        anomaly = build_anomaly_event(
+                            self.cfg, zone.zone_id, det, track_id, self.clock()
+                        )
+                        await self._emit(self.cfg.camera_id, anomaly)
+                        published += 1
         return published

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,9 +51,9 @@ class AnomalyEvent(BaseModel):
     camera_id: str
     zone_id: str | None = None
     track_id: str
-    object_class: str
+    object_class: Literal["person", "forklift"]
     severity: Severity
     confidence: float = Field(..., ge=0.0, le=1.0)
     dedup_key: str
     evidence: Evidence
-    source: str = "edge"
+    source: Literal["edge", "replay"] = "edge"

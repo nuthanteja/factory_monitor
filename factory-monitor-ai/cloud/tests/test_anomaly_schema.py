@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from cloud.common.schemas.anomaly import AnomalyEvent, AnomalyType, Severity
 
@@ -45,3 +46,20 @@ def test_zone_id_nullable() -> None:
     d["zone_id"] = None
     ev = AnomalyEvent.model_validate(d)
     assert ev.zone_id is None
+
+
+def test_object_class_and_source_constraints() -> None:
+    """Ensure object_class and source are constrained to Literal values."""
+    valid = _fixture_dict()
+
+    # Test invalid object_class
+    invalid_object_class = valid.copy()
+    invalid_object_class["object_class"] = "robot"
+    with pytest.raises(ValidationError):
+        AnomalyEvent.model_validate(invalid_object_class)
+
+    # Test invalid source
+    invalid_source = valid.copy()
+    invalid_source["source"] = "Replay"
+    with pytest.raises(ValidationError):
+        AnomalyEvent.model_validate(invalid_source)

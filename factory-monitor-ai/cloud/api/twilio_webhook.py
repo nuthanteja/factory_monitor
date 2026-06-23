@@ -5,7 +5,8 @@ Security: X-Twilio-Signature HMAC-SHA1 (not JWT).
 Logic (§7):
   1. Validate signature.  Bad → 403.
   2. Parse From (E.164 after stripping 'whatsapp:' prefix) + Body.
-  3. Match sender to the most-recent SENT outbox row to_phone_e164 == from_phone.
+  3. Match sender to the most-recent outbound messages row (direction='out',
+     to_phone_e164 == from_phone, status='sent') → its incident.
   4. Matched:
      a. UPSERT whatsapp_sessions (window +24h).
      b. INSERT messages(direction='in').
@@ -31,12 +32,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.api.deps import get_session_maker
+from cloud.common.config import get_settings
 from cloud.common.db.models import (
     Incident,
     IncidentEvent,
     IncidentStatus,
     Message,
-    Outbox,
     UnmatchedInbound,
     WhatsappSession,
 )
@@ -73,7 +74,7 @@ async def twilio_inbound(
     session_maker: async_sessionmaker = Depends(get_session_maker),
     x_twilio_signature: str | None = Header(default=None, alias="X-Twilio-Signature"),
 ) -> PlainTextResponse:
-    auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    settings = get_settings()
 
     # Parse form body
     form_data = await request.form()
@@ -82,9 +83,11 @@ async def twilio_inbound(
     # Build the canonical URL Twilio signed (scheme+host+path, no query)
     url = str(request.url).split("?")[0]
 
-    # Validate signature (skip validation only when auth_token is empty = dev/test without Twilio)
-    if auth_token:
-        if not x_twilio_signature or not _validate_twilio_signature(
+    # Signature validation — fail-closed by default.
+    # Only bypass when TWILIO_SKIP_SIGNATURE_CHECK=true (deliberate dev/test opt-in).
+    if not settings.twilio_skip_signature_check:
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+        if not auth_token or not x_twilio_signature or not _validate_twilio_signature(
             auth_token, url, params, x_twilio_signature
         ):
             raise HTTPException(status_code=403, detail="Invalid Twilio signature")
@@ -99,13 +102,15 @@ async def twilio_inbound(
     window_expires = now + timedelta(hours=_WINDOW_HOURS)
 
     async with session_maker() as session:
-        # Find the most-recent SENT outbox row sent TO this phone
-        outbox_row: Outbox | None = (
+        # Find the most-recent outbound messages row sent TO this phone
+        # (direction='out', status='sent') — this is the canonical match table.
+        outbound_msg: Message | None = (
             await session.execute(
-                select(Outbox)
-                .where(Outbox.to_phone_e164 == from_phone)
-                .where(Outbox.status == "SENT")
-                .order_by(desc(Outbox.created_at))
+                select(Message)
+                .where(Message.to_phone_e164 == from_phone)
+                .where(Message.direction == "out")
+                .where(Message.status == "sent")
+                .order_by(desc(Message.created_at))
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -124,8 +129,8 @@ async def twilio_inbound(
         )
         await session.execute(upsert_stmt)
 
-        if outbox_row is not None:
-            incident_id = outbox_row.incident_id
+        if outbound_msg is not None:
+            incident_id = outbound_msg.incident_id
 
             # Load the incident
             inc: Incident | None = (
@@ -134,20 +139,21 @@ async def twilio_inbound(
                 )
             ).scalar_one_or_none()
 
-            # Record inbound message
-            session.add(Message(
-                id=uuid.uuid4(),
-                incident_id=incident_id,
-                direction="in",
-                channel="whatsapp",
-                from_phone_e164=from_phone,
-                body=body_text,
-                provider_sid=provider_sid,
-                status="received",
-            ))
-
-            # Audit REPLY_RECEIVED
+            # Record inbound message only when we have a valid incident to link to.
+            # Avoids a dangling FK if the referenced incident no longer exists.
             if inc is not None:
+                session.add(Message(
+                    id=uuid.uuid4(),
+                    incident_id=incident_id,
+                    direction="in",
+                    channel="whatsapp",
+                    from_phone_e164=from_phone,
+                    body=body_text,
+                    provider_sid=provider_sid,
+                    status="received",
+                ))
+
+                # Audit REPLY_RECEIVED
                 session.add(IncidentEvent(
                     incident_id=incident_id,
                     type="REPLY_RECEIVED",
@@ -195,7 +201,7 @@ async def twilio_inbound(
                         payload={"source": "whatsapp_reply", "body": body_text},
                     ))
         else:
-            # No matching outbound — store as unmatched
+            # No matching outbound message — store as unmatched
             session.add(UnmatchedInbound(
                 id=uuid.uuid4(),
                 from_phone_e164=from_phone,

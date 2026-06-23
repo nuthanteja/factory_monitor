@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Escalation timing
     operator_grace_seconds: int = 120
 
+    # Twilio
+    twilio_skip_signature_check: bool = False  # TWILIO_SKIP_SIGNATURE_CHECK — deliberate dev/test opt-in only
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

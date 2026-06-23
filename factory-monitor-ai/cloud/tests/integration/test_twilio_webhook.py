@@ -7,6 +7,7 @@ import base64
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 import pytest
@@ -23,7 +24,7 @@ from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
 from cloud.common.db.models import (
     Incident, IncidentEvent, IncidentStatus,
-    Message, Outbox, UnmatchedInbound, WhatsappSession,
+    Message, UnmatchedInbound, WhatsappSession,
 )
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -100,17 +101,16 @@ def _make_incident(status: IncidentStatus = IncidentStatus.AWAITING_OPERATOR) ->
     )
 
 
-def _make_outbox(incident_id: uuid.UUID, to_phone: str) -> Outbox:
-    return Outbox(
+def _make_outbound_message(incident_id: uuid.UUID, to_phone: str) -> Message:
+    """Seed a sent outbound messages row — the table the webhook matches against."""
+    return Message(
         id=uuid.uuid4(),
         incident_id=incident_id,
-        tier=1,
-        to_phone_e164=to_phone,
+        direction="out",
         channel="whatsapp",
-        kind="TEMPLATE",
-        template_name="factory_alert_tier1",
-        idempotency_key=f"{incident_id}|1",
-        status="SENT",
+        to_phone_e164=to_phone,
+        body="Alert: PPE violation detected.",
+        status="sent",
     )
 
 
@@ -135,14 +135,14 @@ def _signed_headers(params: dict[str, str]) -> dict[str, str]:
 
 @pytest.mark.asyncio
 async def test_matched_inbound_opens_whatsapp_session_and_writes_message(client, maker):
-    """A reply from a known phone (matching an outbox row) records message + session."""
+    """A reply from a known phone (matching an outbound messages row) records message + session."""
     from_phone = "+12025550101"
     inc = _make_incident()
-    outbox = _make_outbox(inc.id, from_phone)
+    out_msg = _make_outbound_message(inc.id, from_phone)
 
     async with maker() as s:
         s.add(inc)
-        s.add(outbox)
+        s.add(out_msg)
         await s.commit()
 
     params = _inbound_params(from_phone, "Got it, heading over now.")
@@ -189,11 +189,11 @@ async def test_ack_keyword_closes_incident(client, maker):
     """Reply of 'ACK' closes the incident (next_fire_at=NULL, status=ACK)."""
     from_phone = "+12025550202"
     inc = _make_incident()
-    outbox = _make_outbox(inc.id, from_phone)
+    out_msg = _make_outbound_message(inc.id, from_phone)
 
     async with maker() as s:
         s.add(inc)
-        s.add(outbox)
+        s.add(out_msg)
         await s.commit()
 
     params = _inbound_params(from_phone, "ACK")
@@ -215,11 +215,11 @@ async def test_resolve_keyword_closes_incident(client, maker):
     """Reply of 'RESOLVED' closes the incident (status=RESOLVED)."""
     from_phone = "+12025550303"
     inc = _make_incident()
-    outbox = _make_outbox(inc.id, from_phone)
+    out_msg = _make_outbound_message(inc.id, from_phone)
 
     async with maker() as s:
         s.add(inc)
-        s.add(outbox)
+        s.add(out_msg)
         await s.commit()
 
     params = _inbound_params(from_phone, "RESOLVED")
@@ -236,11 +236,12 @@ async def test_resolve_keyword_closes_incident(client, maker):
         assert row.next_fire_at is None
 
 
-# ── bad signature → 403 ───────────────────────────────────────────────────────
+# ── bad signature → 403, no DB write ─────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_bad_signature_returns_403(client, maker):
-    params = _inbound_params("+12025550999", "ACK")
+    bad_phone = "+12025550999"
+    params = _inbound_params(bad_phone, "ACK")
     resp = await client.post(
         "/webhooks/twilio/inbound",
         content=urlencode(params),
@@ -251,12 +252,58 @@ async def test_bad_signature_returns_403(client, maker):
     )
     assert resp.status_code == 403
 
+    # Confirm no DB row was written for this sender
+    async with maker() as s:
+        row = (
+            await s.execute(
+                select(UnmatchedInbound).where(UnmatchedInbound.from_phone_e164 == bad_phone)
+            )
+        ).scalars().first()
+        assert row is None, "No unmatched_inbound row should be written on bad signature"
+
+
+# ── missing auth token → 403 (fail-closed) ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_no_auth_token_fails_closed(maker):
+    """When TWILIO_SKIP_SIGNATURE_CHECK is False (default) and no auth token is
+    configured, requests must be rejected with 403 — no silent bypass."""
+    import os
+    # Ensure no token and skip flag not set
+    env_without_token = {k: v for k, v in os.environ.items() if k != "TWILIO_AUTH_TOKEN"}
+    with patch.dict(os.environ, env_without_token, clear=True):
+        from cloud.common.config import get_settings
+        get_settings.cache_clear()
+        app = create_app()
+        # Override session maker so the app can boot; request should 403 before DB
+        engine = create_async_engine(
+            # Use a dummy URL — should never reach DB on 403 path
+            "postgresql+asyncpg://factory:factory@localhost:5432/factory",
+            future=True,
+        )
+        m = async_sessionmaker(engine, expire_on_commit=False)
+        app.dependency_overrides[get_session_maker] = lambda: m
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            params = _inbound_params("+10005550000", "hello")
+            resp = await c.post(
+                "/webhooks/twilio/inbound",
+                content=urlencode(params),
+                headers={
+                    "X-Twilio-Signature": "anysignature==",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+        await engine.dispose()
+        get_settings.cache_clear()
+    assert resp.status_code == 403, f"Expected 403 when no auth token; got {resp.status_code}"
+
 
 # ── unmatched inbound ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_unmatched_inbound_is_stored(client, maker):
-    """A reply from an unknown phone (no outbox row) goes to unmatched_inbound."""
+    """A reply from an unknown phone (no outbound messages row) goes to unmatched_inbound."""
     unknown_phone = "+19995550000"
     params = _inbound_params(unknown_phone, "Hello?")
     resp = await client.post(

@@ -17,6 +17,7 @@ export function IncidentCard({
     <article data-testid="incident-card" data-severity={incident.severity}>
       <header>
         <span data-testid="incident-camera">{incident.camera_id}</span>
+        {incident.zone_id && <span data-testid="incident-zone">{incident.zone_id}</span>}
         <span data-testid="incident-severity">{incident.severity}</span>
       </header>
       <p data-testid="incident-anomaly">{incident.anomaly_type}</p>

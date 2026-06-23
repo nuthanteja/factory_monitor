@@ -20,6 +20,7 @@ describe("IncidentCard", () => {
   it("renders camera, anomaly_type, severity, status, and created_at", () => {
     render(<IncidentCard incident={incident} />);
     expect(screen.getByText("cam_01")).toBeInTheDocument();
+    expect(screen.getByText("zone_weld_bay")).toBeInTheDocument();
     expect(screen.getByText("ppe_no_hardhat")).toBeInTheDocument();
     expect(screen.getByText(/high/i)).toBeInTheDocument();
     expect(screen.getByText(/AWAITING_OPERATOR/)).toBeInTheDocument();
@@ -29,6 +30,18 @@ describe("IncidentCard", () => {
         el.getAttribute("dateTime") === "2026-06-22T10:15:03.412Z",
     );
     expect(time).toBeInTheDocument();
+  });
+
+  it("renders zone_id via incident-zone testid when zone_id is set", () => {
+    render(<IncidentCard incident={incident} />);
+    const zone = screen.getByTestId("incident-zone");
+    expect(zone).toHaveTextContent("zone_weld_bay");
+  });
+
+  it("does not render zone when zone_id is null", () => {
+    const incidentNoZone: Incident = { ...incident, zone_id: null };
+    render(<IncidentCard incident={incidentNoZone} />);
+    expect(screen.queryByTestId("incident-zone")).not.toBeInTheDocument();
   });
 
   it("exposes severity for styling via a data attribute", () => {

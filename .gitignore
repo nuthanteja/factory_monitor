@@ -1,3 +1,5 @@
-# Subagent-driven execution scratch (task briefs, reports, review-package diffs).
-# progress.md is already tracked and stays tracked; this only excludes new scratch.
+# Local-only build-process material (kept on disk, never published):
+#  - .superpowers/  : subagent execution scratch (task briefs, reports, diffs, ledger)
+#  - docs/superpowers/ : design spec + implementation plans used to build this project
 .superpowers/
+docs/superpowers/

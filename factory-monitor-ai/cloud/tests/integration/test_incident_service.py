@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -97,6 +97,15 @@ async def test_new_event_creates_one_incident_and_one_event(session_factory):
         assert inc.current_tier == 0
         assert inc.dedup_key == event.dedup_key
         assert inc.next_fire_at is not None
+        now = datetime.now(timezone.utc)
+        # next_fire_at should be ≈ now + 120s; allow ±30s window for flakiness
+        _nfa = inc.next_fire_at
+        if _nfa.tzinfo is None:
+            # column returned naive UTC — compare against naive UTC
+            _now_cmp = now.replace(tzinfo=None)
+        else:
+            _now_cmp = now
+        assert _now_cmp + timedelta(seconds=90) <= _nfa <= _now_cmp + timedelta(seconds=150)
         ev = (
             await s.execute(select(IncidentEvent).where(IncidentEvent.incident_id == inc.id))
         ).scalar_one()

@@ -106,6 +106,8 @@ async def create_incident_from_anomaly(
         await session.rollback()
         if await _event_id_seen(session, source_event_id):
             return IncidentResult(incident_id=None, created=False, reason="duplicate_event_id")
-        return IncidentResult(incident_id=None, created=False, reason="duplicate_open_dedup")
+        if await _open_incident_exists(session, event.dedup_key):
+            return IncidentResult(incident_id=None, created=False, reason="duplicate_open_dedup")
+        raise
 
     return IncidentResult(incident_id=incident.id, created=True, reason="created")

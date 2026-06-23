@@ -273,6 +273,19 @@ async def test_tier2_fires_critical_unresolved(maker):
         ).scalar_one()
         assert evt is not None
 
+        # CRITICAL is a terminal/dashboard-only state — no outbox page should exist
+        outbox_count = len(
+            (
+                await s.execute(
+                    select(Outbox).where(
+                        Outbox.incident_id == inc.id,
+                        Outbox.tier == 3,
+                    )
+                )
+            ).scalars().all()
+        )
+        assert outbox_count == 0, "CRITICAL tier must not produce an outbox page"
+
 
 # ── Full chain: AWAITING_OPERATOR → TIER1 → TIER2 → CRITICAL ───────────────
 

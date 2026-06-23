@@ -86,6 +86,10 @@ async def _fetch_tier_config(
         select(EscalationTier)
         .where(EscalationTier.site_id == site_id)
         .where(EscalationTier.tier == tier)
+        .where(
+            (EscalationTier.anomaly_type == anomaly_type)
+            | (EscalationTier.anomaly_type.is_(None))
+        )
         .order_by(EscalationTier.anomaly_type.is_(None).asc())
         .limit(1)
     )
@@ -117,14 +121,17 @@ async def fire_transition(
 
     now = datetime.now(timezone.utc)
 
-    # 2. Compute next_fire_at from escalation_tiers config (or NULL for terminal)
-    new_next_fire_at: datetime | None = None
+    # 2. Fetch tier config once (NULL for terminal tier; not needed)
+    tier_cfg: EscalationTier | None = None
     if next_status != IncidentStatus.CRITICAL_UNRESOLVED.value:
         tier_cfg = await _fetch_tier_config(
             session, incident.site_id, incident.anomaly_type, next_tier
         )
-        if tier_cfg is not None:
-            new_next_fire_at = now + timedelta(seconds=tier_cfg.delay_seconds)
+
+    # Compute next_fire_at from cached config (or NULL for terminal)
+    new_next_fire_at: datetime | None = None
+    if tier_cfg is not None:
+        new_next_fire_at = now + timedelta(seconds=tier_cfg.delay_seconds)
 
     # 3. Resolve next on-call recipient
     outbox_phone: str | None = None
@@ -136,12 +143,9 @@ async def fire_transition(
         )
         if recipient is not None:
             outbox_phone = recipient.phone_e164
-        # fetch template for this next_tier
-        next_tier_cfg = await _fetch_tier_config(
-            session, incident.site_id, incident.anomaly_type, next_tier
-        )
-        if next_tier_cfg is not None:
-            outbox_template = next_tier_cfg.template_name
+        # reuse cached tier_cfg for template (no second DB round-trip)
+        if tier_cfg is not None:
+            outbox_template = tier_cfg.template_name
 
     # 4. Audit event
     audit = IncidentEvent(

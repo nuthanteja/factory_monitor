@@ -92,6 +92,56 @@ services:
         "psycopg2-binary>=2.9" "pydantic>=2.7" "pydantic-settings>=2.3" &&
         alembic -c cloud/migrations/alembic.ini upgrade head
 
+  api:
+    build:
+      context: .
+      dockerfile: cloud/api/Dockerfile
+    image: factory-monitor/api:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_ANOMALIES_TOPIC: "vision.anomalies.v1"
+      KAFKA_DLQ_TOPIC: "vision.anomalies.dlq"
+      KAFKA_CONSUMER_GROUP: "ingest-worker"
+      OPERATOR_GRACE_SECONDS: "120"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  ingest_worker:
+    build:
+      context: .
+      dockerfile: cloud/ingest_worker/Dockerfile
+    image: factory-monitor/ingest-worker:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_ANOMALIES_TOPIC: "vision.anomalies.v1"
+      KAFKA_DLQ_TOPIC: "vision.anomalies.dlq"
+      KAFKA_CONSUMER_GROUP: "ingest-worker"
+      OPERATOR_GRACE_SECONDS: "120"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   kafkadata:

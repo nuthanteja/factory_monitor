@@ -1,0 +1,13 @@
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+node_modules
+.git
+footage/*.mp4
+edge/models/*.pt
+*.pyc
+.env
+.env.*

@@ -162,6 +162,43 @@ async def _process_row(
         await session.commit()
 
 
+class NotifierRelay:
+    """Class wrapper around run_once() for use by the test suite.
+
+    Provides the .drain_once() method declared in the Task-18 interface contract.
+    Accepts either a ProviderChain or a bare list of providers (auto-wrapped).
+    """
+
+    def __init__(
+        self,
+        session_maker: async_sessionmaker,
+        provider_chain: "ProviderChain | list",
+        *,
+        batch: int = _BATCH,
+        backoff_base: int = _BACKOFF_BASE_SECONDS,
+    ) -> None:
+        self._session_maker = session_maker
+        if isinstance(provider_chain, ProviderChain):
+            self._chain = provider_chain
+        else:
+            # Bare list of providers: wrap in ProviderChain
+            self._chain = ProviderChain(provider_chain)
+        self._batch = batch
+        self._backoff_base = backoff_base
+
+    async def drain_once(self) -> int:
+        """Drain all PENDING outbox rows that are due now.
+
+        Returns count of rows successfully delivered (status changed to SENT).
+        """
+        return await run_once(
+            self._session_maker,
+            self._chain,
+            batch=self._batch,
+            backoff_base=self._backoff_base,
+        )
+
+
 async def run_forever(
     session_maker: async_sessionmaker,
     provider_chain: ProviderChain,

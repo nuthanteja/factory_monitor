@@ -68,7 +68,27 @@ async def poll_once(
     batch: int = 10,
 ) -> int:
     """Claim + transition one batch of due incidents.  Returns rows processed."""
-    processed = 0
+    return len(await poll_once_ids(
+        session_maker,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        batch=batch,
+    ))
+
+
+async def poll_once_ids(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    worker_id: str,
+    lease_seconds: int = 30,
+    batch: int = 10,
+) -> list[uuid.UUID]:
+    """Claim + transition one batch of due incidents.
+
+    Returns list of incident IDs that were actually transitioned (idempotency
+    skips and defensive-recheck skips are NOT included).
+    """
+    fired_ids: list[uuid.UUID] = []
 
     async with session_maker() as claim_session:
         rows = (
@@ -110,7 +130,7 @@ async def poll_once(
                 result: TransitionResult = await fire_transition(txn_session, incident)
                 await txn_session.commit()
                 if result.fired:
-                    processed += 1
+                    fired_ids.append(incident_id)
                     logger.info(
                         "escalation fired incident_id=%s new_status=%s",
                         incident_id, result.new_status,
@@ -129,7 +149,7 @@ async def poll_once(
             except Exception:
                 logger.warning("failed to release claim for incident_id=%s", incident_id)
 
-    return processed
+    return fired_ids
 
 
 class EscalationWorker:
@@ -143,13 +163,29 @@ class EscalationWorker:
         poll_interval_seconds: float = 1.0,
         lease_seconds: int = 30,
         batch: int = 10,
+        batch_size: int | None = None,  # alias for batch; batch_size wins if both given
     ) -> None:
         self._session_maker = session_maker
         self._worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self._poll_interval = poll_interval_seconds
         self._lease_seconds = lease_seconds
-        self._batch = batch
+        self._batch = batch_size if batch_size is not None else batch
         self._running = False
+
+    async def run_once(self) -> list[uuid.UUID]:
+        """Execute one poll batch and return list of incident IDs that were fired.
+
+        Idempotency skips and defensive-recheck skips are NOT included in the
+        returned list — only incidents whose state machine transition committed.
+        Used by the integration test suite to drive time-travel escalation
+        scenarios without the continuous poll loop.
+        """
+        return await poll_once_ids(
+            self._session_maker,
+            worker_id=self._worker_id,
+            lease_seconds=self._lease_seconds,
+            batch=self._batch,
+        )
 
     async def start(self) -> None:
         self._running = True

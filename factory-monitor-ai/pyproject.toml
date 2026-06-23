@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.3",
     "alembic>=1.13",
     "aiokafka>=0.11",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ api = [
     "asyncpg>=0.29",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "python-multipart>=0.0.9",
 ]
 worker = [
     "sqlalchemy[asyncio]>=2.0.30",

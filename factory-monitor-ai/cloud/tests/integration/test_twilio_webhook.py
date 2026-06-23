@@ -1,0 +1,278 @@
+# E:/Builds/factory_monitor/factory-monitor-ai/cloud/tests/integration/test_twilio_webhook.py
+from __future__ import annotations
+
+import hashlib
+import hmac
+import base64
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlencode
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from testcontainers.postgres import PostgresContainer
+
+from alembic import command
+from alembic.config import Config
+
+from cloud.api.deps import get_session_maker
+from cloud.api.main import create_app
+from cloud.common.db.models import (
+    Incident, IncidentEvent, IncidentStatus,
+    Message, Outbox, UnmatchedInbound, WhatsappSession,
+)
+
+MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
+TWILIO_AUTH_TOKEN = "test_twilio_auth_token_32chars_ok"
+WEBHOOK_URL = "http://test/webhooks/twilio/inbound"
+
+
+def _async_url(sync_url: str) -> str:
+    return sync_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
+        "postgresql://", "postgresql+asyncpg://"
+    )
+
+
+def _twilio_signature(auth_token: str, url: str, params: dict[str, str]) -> str:
+    """Compute the Twilio HMAC-SHA1 signature the same way Twilio does."""
+    sorted_params = "".join(f"{k}{v}" for k, v in sorted(params.items()))
+    s = url + sorted_params
+    sig = hmac.new(auth_token.encode(), s.encode(), hashlib.sha1).digest()
+    return base64.b64encode(sig).decode()
+
+
+@pytest.fixture(scope="module")
+def pg_container():
+    with PostgresContainer("postgres:16") as pg:
+        yield pg
+
+
+@pytest.fixture(scope="module")
+def migrated_url(pg_container: PostgresContainer) -> str:
+    sync_url = pg_container.get_connection_url()
+    cfg = Config()
+    cfg.set_main_option("script_location", MIGRATIONS)
+    cfg.set_main_option("sqlalchemy.url", sync_url)
+    command.upgrade(cfg, "head")
+    return _async_url(sync_url)
+
+
+@pytest_asyncio.fixture
+async def maker(migrated_url: str):
+    engine = create_async_engine(migrated_url, future=True)
+    m = async_sessionmaker(engine, expire_on_commit=False)
+    yield m
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def client(maker):
+    import os
+    os.environ["TWILIO_AUTH_TOKEN"] = TWILIO_AUTH_TOKEN
+    app = create_app()
+    app.dependency_overrides[get_session_maker] = lambda: maker
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+def _make_incident(status: IncidentStatus = IncidentStatus.AWAITING_OPERATOR) -> Incident:
+    return Incident(
+        id=uuid.uuid4(),
+        site_id="plant-01",
+        camera_id="cam_01",
+        zone_id="zone_weld_bay",
+        anomaly_type="ppe_no_hardhat",
+        rule_id="PPE_NO_HARDHAT",
+        object_class="person",
+        track_id="cam_01:5001",
+        severity="high",
+        dedup_key=f"cam_01|cam_01:5001|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}",
+        status=status,
+        current_tier=1,
+        next_fire_at=datetime.now(tz=timezone.utc) + timedelta(seconds=300),
+        snapshot_url="",
+        is_synthetic=False,
+    )
+
+
+def _make_outbox(incident_id: uuid.UUID, to_phone: str) -> Outbox:
+    return Outbox(
+        id=uuid.uuid4(),
+        incident_id=incident_id,
+        tier=1,
+        to_phone_e164=to_phone,
+        channel="whatsapp",
+        kind="TEMPLATE",
+        template_name="factory_alert_tier1",
+        idempotency_key=f"{incident_id}|1",
+        status="SENT",
+    )
+
+
+def _inbound_params(from_phone: str, body: str, provider_sid: str | None = None) -> dict[str, str]:
+    return {
+        "From": f"whatsapp:{from_phone}",
+        "Body": body,
+        "MessageSid": provider_sid or f"SM{uuid.uuid4().hex}",
+        "To": "whatsapp:+14155238886",
+    }
+
+
+def _signed_headers(params: dict[str, str]) -> dict[str, str]:
+    sig = _twilio_signature(TWILIO_AUTH_TOKEN, WEBHOOK_URL, params)
+    return {
+        "X-Twilio-Signature": sig,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+
+# ── matched inbound → REPLY_RECEIVED ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_matched_inbound_opens_whatsapp_session_and_writes_message(client, maker):
+    """A reply from a known phone (matching an outbox row) records message + session."""
+    from_phone = "+12025550101"
+    inc = _make_incident()
+    outbox = _make_outbox(inc.id, from_phone)
+
+    async with maker() as s:
+        s.add(inc)
+        s.add(outbox)
+        await s.commit()
+
+    params = _inbound_params(from_phone, "Got it, heading over now.")
+    resp = await client.post(
+        "/webhooks/twilio/inbound",
+        content=urlencode(params),
+        headers=_signed_headers(params),
+    )
+    assert resp.status_code == 200
+
+    async with maker() as s:
+        # WhatsApp session opened
+        session_row = (
+            await s.execute(
+                select(WhatsappSession).where(WhatsappSession.phone_e164 == from_phone)
+            )
+        ).scalar_one()
+        assert session_row.window_expires_at > datetime.now(tz=timezone.utc)
+
+        # Message recorded direction='in'
+        msg = (
+            await s.execute(
+                select(Message)
+                .where(Message.from_phone_e164 == from_phone)
+                .where(Message.direction == "in")
+            )
+        ).scalar_one()
+        assert msg.incident_id == inc.id
+        assert msg.body == "Got it, heading over now."
+
+        # Audit REPLY_RECEIVED
+        evt = (
+            await s.execute(
+                select(IncidentEvent)
+                .where(IncidentEvent.incident_id == inc.id)
+                .where(IncidentEvent.type == "REPLY_RECEIVED")
+            )
+        ).scalar_one()
+        assert evt is not None
+
+
+@pytest.mark.asyncio
+async def test_ack_keyword_closes_incident(client, maker):
+    """Reply of 'ACK' closes the incident (next_fire_at=NULL, status=ACK)."""
+    from_phone = "+12025550202"
+    inc = _make_incident()
+    outbox = _make_outbox(inc.id, from_phone)
+
+    async with maker() as s:
+        s.add(inc)
+        s.add(outbox)
+        await s.commit()
+
+    params = _inbound_params(from_phone, "ACK")
+    resp = await client.post(
+        "/webhooks/twilio/inbound",
+        content=urlencode(params),
+        headers=_signed_headers(params),
+    )
+    assert resp.status_code == 200
+
+    async with maker() as s:
+        row = (await s.execute(select(Incident).where(Incident.id == inc.id))).scalar_one()
+        assert row.status == IncidentStatus.ACK
+        assert row.next_fire_at is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_keyword_closes_incident(client, maker):
+    """Reply of 'RESOLVED' closes the incident (status=RESOLVED)."""
+    from_phone = "+12025550303"
+    inc = _make_incident()
+    outbox = _make_outbox(inc.id, from_phone)
+
+    async with maker() as s:
+        s.add(inc)
+        s.add(outbox)
+        await s.commit()
+
+    params = _inbound_params(from_phone, "RESOLVED")
+    resp = await client.post(
+        "/webhooks/twilio/inbound",
+        content=urlencode(params),
+        headers=_signed_headers(params),
+    )
+    assert resp.status_code == 200
+
+    async with maker() as s:
+        row = (await s.execute(select(Incident).where(Incident.id == inc.id))).scalar_one()
+        assert row.status == IncidentStatus.RESOLVED
+        assert row.next_fire_at is None
+
+
+# ── bad signature → 403 ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_bad_signature_returns_403(client, maker):
+    params = _inbound_params("+12025550999", "ACK")
+    resp = await client.post(
+        "/webhooks/twilio/inbound",
+        content=urlencode(params),
+        headers={
+            "X-Twilio-Signature": "invalidsignature==",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    assert resp.status_code == 403
+
+
+# ── unmatched inbound ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_unmatched_inbound_is_stored(client, maker):
+    """A reply from an unknown phone (no outbox row) goes to unmatched_inbound."""
+    unknown_phone = "+19995550000"
+    params = _inbound_params(unknown_phone, "Hello?")
+    resp = await client.post(
+        "/webhooks/twilio/inbound",
+        content=urlencode(params),
+        headers=_signed_headers(params),
+    )
+    assert resp.status_code == 200
+
+    async with maker() as s:
+        row = (
+            await s.execute(
+                select(UnmatchedInbound)
+                .where(UnmatchedInbound.from_phone_e164 == unknown_phone)
+                .order_by(UnmatchedInbound.created_at.desc())
+            )
+        ).scalars().first()
+        assert row is not None
+        assert row.body == "Hello?"

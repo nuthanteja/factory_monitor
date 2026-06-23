@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # Escalation timing
     operator_grace_seconds: int = 120
+    escalation_lease_seconds: int = 30
 
     # Notification provider chain
     notify_provider_chain: str = "console"  # comma-separated: whatsapp,sms,console

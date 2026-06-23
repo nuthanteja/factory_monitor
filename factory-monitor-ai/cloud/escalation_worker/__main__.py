@@ -23,7 +23,7 @@ async def main() -> None:
     worker = EscalationWorker(
         session_maker=maker,
         poll_interval_seconds=1.0,
-        lease_seconds=30,
+        lease_seconds=settings.escalation_lease_seconds,
         batch=10,
     )
 

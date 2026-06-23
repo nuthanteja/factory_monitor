@@ -1,6 +1,7 @@
 """Demo roster + escalation tier seed for development and integration tests.
 
-All inserts use INSERT … ON CONFLICT DO NOTHING so re-running is safe.
+Inserts use ON CONFLICT DO NOTHING (users, assignments) or DO UPDATE (tiers)
+so re-running is safe/idempotent.
 Tier 0 = OPERATOR (grace period before first escalation).
 Tier 1 = FLOOR_MANAGER.
 Tier 2 = PLANT_DIRECTOR (last escalation before CRITICAL_UNRESOLVED).

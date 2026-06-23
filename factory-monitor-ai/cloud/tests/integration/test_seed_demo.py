@@ -91,6 +91,8 @@ async def test_seed_is_idempotent(maker):
     await seed_demo_tiers(maker, site_id="plant-01", delay_seconds=5)
     async with maker() as s:
         users = (await s.execute(select(func.count()).select_from(User))).scalar_one()
+        assignments = (await s.execute(select(func.count()).select_from(OnCallAssignment))).scalar_one()
         tiers = (await s.execute(select(func.count()).select_from(EscalationTier))).scalar_one()
     assert users == 3
+    assert assignments == 3
     assert tiers == 3

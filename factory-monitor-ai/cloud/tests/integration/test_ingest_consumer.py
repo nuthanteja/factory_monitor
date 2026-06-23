@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -138,7 +139,7 @@ async def test_malformed_message_goes_to_dlq_and_creates_no_incident(
     )
     await consumer.start()
     try:
-        msg = await consumer.getone()
+        msg = await asyncio.wait_for(consumer.getone(), timeout=10.0)
         assert msg.value == bad
     finally:
         await consumer.stop()

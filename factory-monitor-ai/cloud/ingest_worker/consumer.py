@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka.errors import ConsumerStoppedError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -11,7 +13,7 @@ from cloud.common.db.session import session_factory
 from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.ingest_worker.service import create_incident_from_anomaly
 
-logger = logging.getLogger("ingest_worker")
+logger = logging.getLogger(__name__)
 
 
 async def handle_message(
@@ -83,23 +85,34 @@ class IngestConsumer:
 
     async def run_forever(self) -> None:
         assert self._consumer is not None and self._producer is not None
-        async for msg in self._consumer:
-            if not self._running:
-                break
-            status = await handle_message(
-                self._session_maker,
-                self._producer,
-                msg.value,
-                msg.key,
-                dlq_topic=self._settings.kafka_dlq_topic,
-                grace_seconds=self._settings.operator_grace_seconds,
-            )
-            # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
-            # BEFORE we commit the Kafka offset here.
-            # A crash between them re-delivers the event; Task 10's source_event_id
-            # unique constraint makes re-delivery a no-op.
-            await self._consumer.commit()
-            logger.debug(
-                "processed offset=%s partition=%s status=%s",
-                msg.offset, msg.partition, status,
-            )
+        try:
+            async for msg in self._consumer:
+                if not self._running:
+                    break
+                try:
+                    status = await handle_message(
+                        self._session_maker,
+                        self._producer,
+                        msg.value,
+                        msg.key,
+                        dlq_topic=self._settings.kafka_dlq_topic,
+                        grace_seconds=self._settings.operator_grace_seconds,
+                    )
+                    # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
+                    # BEFORE we commit the Kafka offset here.
+                    # A crash between them re-delivers the event; Task 10's source_event_id
+                    # unique constraint makes re-delivery a no-op.
+                    await self._consumer.commit()
+                    logger.debug(
+                        "processed offset=%s partition=%s status=%s",
+                        msg.offset, msg.partition, status,
+                    )
+                except Exception:
+                    logger.exception(
+                        "unexpected error processing message topic=%s partition=%s offset=%s"
+                        " — offset NOT committed (redelivery guaranteed)",
+                        msg.topic, msg.partition, msg.offset,
+                    )
+                    raise
+        except (ConsumerStoppedError, asyncio.CancelledError):
+            logger.info("consumer stopped gracefully")

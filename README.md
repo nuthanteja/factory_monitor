@@ -49,4 +49,4 @@ See [`factory-monitor-ai/README.md`](factory-monitor-ai/README.md) for the quick
   real clip with people/PPE at `factory-monitor-ai/footage/raw/source.mp4` and run the
   footage prep script (see the app README). The automated tests stub the detector and
   need no footage.
-- Built collaboratively with AI pair-programming (commits carry `Co-Authored-By` trailers).
+- Built with AI-assisted development tooling; architecture, scope, and engineering decisions are the author's own.

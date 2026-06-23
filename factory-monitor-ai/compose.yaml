@@ -74,6 +74,24 @@ services:
     volumes:
       - ./infra/mediamtx.yml:/mediamtx.yml:ro
 
+  migrate:
+    image: python:3.11-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+    environment:
+      ALEMBIC_DATABASE_URL: postgresql://${POSTGRES_USER:-factory}:${POSTGRES_PASSWORD:-factory}@postgres:5432/${POSTGRES_DB:-factory}
+    volumes:
+      - .:/app:ro
+    entrypoint:
+      - bash
+      - -c
+      - >
+        pip install --quiet "alembic>=1.13" "sqlalchemy[asyncio]>=2.0.30"
+        "psycopg2-binary>=2.9" "pydantic>=2.7" "pydantic-settings>=2.3" &&
+        alembic -c cloud/migrations/alembic.ini upgrade head
+
 volumes:
   pgdata:
   kafkadata:

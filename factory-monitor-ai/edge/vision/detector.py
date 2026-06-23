@@ -9,7 +9,8 @@ ObjectClass = Literal["person", "forklift"]
 
 PERSON_LABELS = {"person"}
 NO_HARDHAT_LABELS = {"no-hardhat", "no_hardhat", "head"}
-HARDHAT_LABELS = {"hardhat", "helmet"}
+HARDHAT_LABELS = {"hardhat", "helmet"}  # Unused: no-hardhat is determined by containment check
+FORKLIFT_LABELS = {"forklift"}
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class _YoloLike(Protocol):
 
 
 def _xyxy_to_xywh(xyxy) -> tuple[int, int, int, int]:
-    x1, y1, x2, y2 = (int(round(float(v))) for v in xyxy)
+    x1, y1, x2, y2 = (int(round(float(v))) for v in xyxy[:4])
     return (x1, y1, x2 - x1, y2 - y1)
 
 
@@ -76,6 +77,7 @@ class PpeDetector:
 
         persons: list[Detection] = []
         no_hardhat_boxes: list[tuple[int, int, int, int]] = []
+        forklifts: list[Detection] = []
 
         for box in result.boxes:
             cls_id = int(float(box.cls[0]))
@@ -91,5 +93,10 @@ class PpeDetector:
             elif label in NO_HARDHAT_LABELS:
                 if conf >= self.ppe_conf:
                     no_hardhat_boxes.append(xywh)
+            elif label in FORKLIFT_LABELS:
+                if conf >= self.person_conf:
+                    forklifts.append(
+                        Detection("forklift", xywh, conf, no_hardhat=False)
+                    )
 
-        return _attach_ppe(persons, no_hardhat_boxes)
+        return _attach_ppe(persons, no_hardhat_boxes) + forklifts

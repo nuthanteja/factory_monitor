@@ -29,7 +29,7 @@ class _FakeModel:
         return [_FakeResult(self._names, self._rows)]
 
 
-NAMES = {0: "person", 1: "hardhat", 2: "no-hardhat"}
+NAMES = {0: "person", 1: "hardhat", 2: "no-hardhat", 3: "forklift"}
 
 
 def test_attach_ppe_marks_person_without_hardhat():
@@ -80,3 +80,16 @@ def test_detect_person_with_hardhat_is_not_flagged():
     persons = [d for d in out if d.object_class == "person"]
     assert len(persons) == 1
     assert persons[0].no_hardhat is False
+
+
+def test_detect_forklift():
+    rows = [
+        ((200, 150, 400, 500), 0.85, 3),
+    ]
+    model = _FakeModel(NAMES, rows)
+    det = PpeDetector(model, person_conf=0.35, ppe_conf=0.35)
+    out = det.detect(np.zeros((720, 1280, 3), dtype=np.uint8))
+    forklifts = [d for d in out if d.object_class == "forklift"]
+    assert len(forklifts) == 1
+    assert forklifts[0].confidence == 0.85
+    assert forklifts[0].no_hardhat is False

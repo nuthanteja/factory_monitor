@@ -1,0 +1,10 @@
+# Minimal MediaMTX baseline config: RTSP in on 8554, WebRTC (WHEP) on 8889.
+# Task 14 (footage) supersedes this with a looping cam_01 source.
+logLevel: info
+rtsp: yes
+rtspAddress: :8554
+webrtc: yes
+webrtcAddress: :8889
+paths:
+  cam_01:
+    source: publisher

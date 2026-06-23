@@ -46,6 +46,7 @@ services:
 
   kafka-init:
     image: apache/kafka:3.7.0
+    profiles: ["init"]
     depends_on:
       kafka:
         condition: service_healthy
@@ -78,6 +79,7 @@ services:
 
   migrate:
     image: python:3.11-slim
+    profiles: ["init"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,8 +106,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
       KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
@@ -134,8 +134,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     environment:
       DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
       KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"

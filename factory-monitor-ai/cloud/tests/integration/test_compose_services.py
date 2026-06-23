@@ -25,7 +25,9 @@ def test_api_service_wiring():
     dep = svc["depends_on"]
     assert dep["postgres"]["condition"] == "service_healthy"
     assert dep["kafka"]["condition"] == "service_healthy"
-    assert dep["migrate"]["condition"] == "service_completed_successfully"
+    # migrate is a profile="init" one-shot service; api depends on postgres+kafka only.
+    # Run `make migrate` explicitly before `make up` to apply the schema.
+    assert "migrate" not in dep
     assert "healthz" in " ".join(svc["healthcheck"]["test"])
     env_keys = (
         set(svc["environment"].keys()) if isinstance(svc["environment"], dict)
@@ -41,7 +43,9 @@ def test_worker_service_wiring():
     dep = svc["depends_on"]
     assert dep["postgres"]["condition"] == "service_healthy"
     assert dep["kafka"]["condition"] == "service_healthy"
-    assert dep["migrate"]["condition"] == "service_completed_successfully"
+    # migrate is a profile="init" one-shot service; ingest_worker depends on postgres+kafka only.
+    # Run `make migrate` explicitly before `make up` to apply the schema.
+    assert "migrate" not in dep
     env_keys = (
         set(svc["environment"].keys()) if isinstance(svc["environment"], dict)
         else {e.split("=", 1)[0] for e in svc["environment"]}

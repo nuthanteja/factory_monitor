@@ -15,7 +15,7 @@ def test_core_services_present_with_images() -> None:
     assert services["postgres"]["image"] == "postgres:16"
     assert services["kafka"]["image"] == "apache/kafka:3.7.0"
     assert services["redis"]["image"] == "redis:7-alpine"
-    assert services["mediamtx"]["image"] == "bluenviron/mediamtx:latest"
+    assert services["mediamtx"]["image"] == "bluenviron/mediamtx:latest-ffmpeg"
 
 
 def test_each_core_service_has_healthcheck() -> None:

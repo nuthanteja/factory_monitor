@@ -25,7 +25,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,7 @@ from cloud.common.db.models import (
     IncidentStatus,
     Outbox,
 )
+from cloud.common.escalation import fetch_tier_config
 from cloud.common.on_call_resolver import resolve
 
 
@@ -76,25 +77,6 @@ async def _idempotency_insert(
     return result.rowcount > 0
 
 
-async def _fetch_tier_config(
-    session: AsyncSession,
-    site_id: str,
-    anomaly_type: str,
-    tier: int,
-) -> EscalationTier | None:
-    stmt = (
-        select(EscalationTier)
-        .where(EscalationTier.site_id == site_id)
-        .where(EscalationTier.tier == tier)
-        .where(
-            (EscalationTier.anomaly_type == anomaly_type)
-            | (EscalationTier.anomaly_type.is_(None))
-        )
-        .order_by(EscalationTier.anomaly_type.is_(None).asc())
-        .limit(1)
-    )
-    return (await session.execute(stmt)).scalar_one_or_none()
-
 
 async def fire_transition(
     session: AsyncSession,
@@ -124,7 +106,7 @@ async def fire_transition(
     # 2. Fetch tier config once (NULL for terminal tier; not needed)
     tier_cfg: EscalationTier | None = None
     if next_status != IncidentStatus.CRITICAL_UNRESOLVED.value:
-        tier_cfg = await _fetch_tier_config(
+        tier_cfg = await fetch_tier_config(
             session, incident.site_id, incident.anomaly_type, next_tier
         )
 

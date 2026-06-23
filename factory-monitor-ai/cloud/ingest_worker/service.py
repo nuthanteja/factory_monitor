@@ -14,13 +14,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.common.db.models import (
-    EscalationTier,
     Incident,
     IncidentEvent,
     IncidentStatus,
     Outbox,
     User,
 )
+from cloud.common.escalation import fetch_tier_config
 from cloud.common.schemas.anomaly import AnomalyEvent
 
 _OPEN_STATUSES = (
@@ -57,24 +57,6 @@ async def _open_incident_exists(session: AsyncSession, dedup_key: str) -> bool:
 async def _event_id_seen(session: AsyncSession, event_id: uuid.UUID) -> bool:
     stmt = select(IncidentEvent.id).where(IncidentEvent.source_event_id == event_id).limit(1)
     return (await session.execute(stmt)).first() is not None
-
-
-async def _fetch_tier_config(
-    session: AsyncSession,
-    site_id: str,
-    anomaly_type: str,
-    tier: int,
-) -> EscalationTier | None:
-    """Return tier config for (site, anomaly_type, tier), falling back to site-wide (NULL)."""
-    stmt = (
-        select(EscalationTier)
-        .where(EscalationTier.site_id == site_id)
-        .where(EscalationTier.tier == tier)
-        .order_by(EscalationTier.anomaly_type.is_(None).asc())  # specific before NULL
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
 
 
 async def _enqueue_outbox(
@@ -172,7 +154,7 @@ async def create_incident_from_anomaly(
 
         # Enqueue tier-0 OPERATOR outbox row atomically when a resolver is wired in.
         if on_call_resolver is not None:
-            tier_cfg = await _fetch_tier_config(
+            tier_cfg = await fetch_tier_config(
                 session, event.site_id, event.anomaly_type.value, tier=0
             )
             operator = await on_call_resolver(

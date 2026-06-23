@@ -60,6 +60,29 @@ make test
 | `frontend/` | React + Vite dashboard |
 | `shared/contracts/` | cross-language fixtures + JSON schema |
 
+## Delivery semantics & known tradeoffs
+
+The escalation engine is **exactly-once**: a `(incident_id, tier)` idempotency
+row is inserted `ON CONFLICT DO NOTHING` inside the same transaction that writes
+the audit event, outbox row, and updated incident state.  A durable
+`next_fire_at` timestamp in Postgres drives the retry timer, so in-flight state
+survives worker restarts and there is no in-memory timer to lose.
+
+Notification **delivery is at-least-once**: the notifier relay sends via the
+provider chain *before* committing the `SENT` status.  A crash after the
+provider network call but before commit (or two concurrent relay replicas racing
+on the same outbox row) can produce a duplicate provider send.  This is
+mitigated by passing an `idempotency_key` to every provider and by a
+`FOR UPDATE` re-lock on the `messages` read-model row that guards inbound-reply
+matching.  Exactly-once *send* (a two-phase `SENDING` claim before the network
+call) is a documented **Phase-3** item.
+
+> **Phase-5 deploy note:** the Twilio inbound-webhook URL is reconstructed from
+> the FastAPI `Request` object.  Behind a reverse proxy this must honour
+> `X-Forwarded-Proto`/`Host` (or a configured public base URL) so the signed
+> URL matches what Twilio used — see the TODO comment in
+> `cloud/api/twilio_webhook.py`.
+
 ## Make targets
 
 `make up` · `make down` · `make logs` · `make topics` · `make migrate` · `make test`

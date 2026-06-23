@@ -80,7 +80,9 @@ async def twilio_inbound(
     form_data = await request.form()
     params: dict[str, str] = {k: str(v) for k, v in form_data.items()}
 
-    # Build the canonical URL Twilio signed (scheme+host+path, no query)
+    # Build the canonical URL Twilio signed (scheme+host+path, no query).
+    # TODO (Phase 5 deploy): behind a reverse proxy, honor X-Forwarded-Proto/Host or use a
+    # configured public webhook base URL so the signed URL matches.
     url = str(request.url).split("?")[0]
 
     # Signature validation — fail-closed by default.

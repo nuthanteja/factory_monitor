@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: up down logs test migrate topics fmt lint typecheck
+.PHONY: up down logs test migrate topics fmt lint typecheck publish-fixture consume-print
 
 up:
 	$(COMPOSE) up -d --wait
@@ -28,3 +28,9 @@ lint:
 
 typecheck:
 	mypy cloud
+
+publish-fixture:
+	python -m cloud.tools.publish_fixture
+
+consume-print:
+	python -m cloud.tools.consume_print

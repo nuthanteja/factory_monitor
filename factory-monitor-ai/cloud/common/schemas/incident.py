@@ -25,6 +25,13 @@ class IncidentOut(BaseModel):
     def _enum_to_str(cls, v: object) -> object:
         return v.value if hasattr(v, "value") else v
 
+    @field_validator("snapshot_url", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
+
 
 class IncidentListResponse(BaseModel):
     incidents: list[IncidentOut]

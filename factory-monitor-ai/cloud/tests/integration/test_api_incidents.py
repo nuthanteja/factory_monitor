@@ -101,6 +101,7 @@ async def test_list_incidents_returns_seeded_incident(client, seeded_incident_id
 
     assert "incidents" in body and "meta" in body
     assert "server_now" in body["meta"]
+    datetime.fromisoformat(body["meta"]["server_now"])  # must be valid ISO-8601
 
     match = [i for i in body["incidents"] if i["id"] == str(seeded_incident_id)]
     assert len(match) == 1
@@ -113,6 +114,7 @@ async def test_list_incidents_returns_seeded_incident(client, seeded_incident_id
     assert inc["status"] == "AWAITING_OPERATOR"
     assert inc["current_tier"] == 0
     assert "created_at" in inc
+    assert inc["snapshot_url"] is None  # empty string "" must be coerced to null
     assert set(inc.keys()) == {
         "id", "camera_id", "zone_id", "anomaly_type", "rule_id",
         "severity", "status", "current_tier", "created_at", "snapshot_url",

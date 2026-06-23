@@ -55,6 +55,7 @@ include = ["cloud*"]
 asyncio_mode = "auto"
 testpaths = ["cloud/tests"]
 addopts = "-ra"
+log_level = "INFO"
 markers = [
     "integration: spins up testcontainers (Docker required)",
 ]

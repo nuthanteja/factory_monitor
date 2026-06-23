@@ -147,6 +147,10 @@ async def test_acknowledge_is_idempotent(client, maker):
             )
         ).scalars().all()
         assert len(rows) == 1
+        # Assert incident DB state: status ACK, timer cleared
+        inc_row = (await s.execute(select(Incident).where(Incident.id == inc.id))).scalar_one()
+        assert inc_row.status == IncidentStatus.ACK
+        assert inc_row.next_fire_at is None
 
 
 @pytest.mark.asyncio
@@ -208,6 +212,21 @@ async def test_resolve_from_ack_state_succeeds(client, maker):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "RESOLVED"
+
+    async with maker() as s:
+        # Assert incident DB state: status RESOLVED, timer cleared
+        row = (await s.execute(select(Incident).where(Incident.id == inc.id))).scalar_one()
+        assert row.status == IncidentStatus.RESOLVED
+        assert row.next_fire_at is None
+        # Assert RESOLVED audit row exists
+        evt = (
+            await s.execute(
+                select(IncidentEvent)
+                .where(IncidentEvent.incident_id == inc.id)
+                .where(IncidentEvent.type == "RESOLVED")
+            )
+        ).scalar_one()
+        assert evt is not None
 
 
 @pytest.mark.asyncio

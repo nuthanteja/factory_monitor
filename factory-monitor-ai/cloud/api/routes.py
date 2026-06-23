@@ -94,6 +94,7 @@ async def acknowledge_incident(
         inc.next_fire_at = None
         inc.deadline_at = None
         inc.acked_at = now
+        # acked_by stays NULL until auth lands (no authenticated principal yet); audit row + acked_at capture the action.
         inc.updated_at = now
 
         session.add(IncidentEvent(
@@ -144,6 +145,7 @@ async def resolve_incident(
         inc.next_fire_at = None
         inc.deadline_at = None
         inc.resolved_at = now
+        # resolved_by stays NULL until auth lands (no authenticated principal yet); audit row + resolved_at capture the action.
         inc.resolution_note = body.resolution_note or None
         inc.updated_at = now
 

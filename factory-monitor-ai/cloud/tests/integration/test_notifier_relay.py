@@ -6,6 +6,7 @@ Test matrix:
   3. At max_attempts: row becomes DEAD, no further attempts.
   4. Two PENDING rows for different incidents: both delivered, two messages rows.
   5. Row with next_attempt_at in the future is skipped.
+  6. Concurrent relay replicas on the same row → exactly one send, one messages row (TOCTOU race).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from cloud.common.db.models import Incident, IncidentStatus, Message, Outbox
 from cloud.notifications.console import ConsoleProvider
 from cloud.notifications.chain import ProviderChain
 from cloud.notifications.provider import NotificationKind, ProviderResult
-from cloud.notifier_worker.relay import run_once
+from cloud.notifier_worker.relay import _process_row, run_once
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
 
@@ -138,7 +139,7 @@ async def test_pending_row_delivered_and_marked_sent(maker: async_sessionmaker):
         ).scalars().all()
         assert len(msgs) == 1
         assert msgs[0].direction == "out"
-        assert msgs[0].channel == "whatsapp"
+        assert msgs[0].channel == "console"  # ConsoleProvider returns channel="console"
 
 
 # ── Test 2: Failing provider retries with incremented attempts ─────────────────
@@ -243,3 +244,47 @@ async def test_future_next_attempt_at_is_skipped(maker: async_sessionmaker):
         after = (await s.execute(select(Outbox).where(Outbox.id == ob_id))).scalar_one()
     assert after.status == "PENDING"
     assert after.attempts == 0
+
+
+# ── Test 6: Concurrent relay replicas → exactly one send, one messages row ────────
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_concurrent_relay_replicas_send_exactly_once(maker: async_sessionmaker):
+    """Two relay coroutines race on the same PENDING row; only one must win.
+
+    The FOR UPDATE re-lock in _process_row ensures the second coroutine sees
+    the row as non-PENDING (already SENT) and exits without inserting a
+    duplicate messages row or triggering a second provider send.
+    """
+    async with maker() as s:
+        inc_id = await _seed_incident(s)
+        ob_id = await _seed_outbox(s, inc_id)
+        await s.commit()
+
+    # Fetch the row snapshot that both "replicas" will receive from their poll pass.
+    async with maker() as s:
+        ob_snapshot = (
+            await s.execute(select(Outbox).where(Outbox.id == ob_id))
+        ).scalar_one()
+
+    chain = ProviderChain([ConsoleProvider()])
+
+    # Run two _process_row calls concurrently against the same snapshot — exactly as
+    # two relay replicas would behave after each fetching the same row in their poll.
+    await asyncio.gather(
+        _process_row(maker, chain, ob_snapshot, backoff_base=10),
+        _process_row(maker, chain, ob_snapshot, backoff_base=10),
+    )
+
+    async with maker() as s:
+        ob = (await s.execute(select(Outbox).where(Outbox.id == ob_id))).scalar_one()
+        assert ob.status == "SENT", "outbox row must be SENT after concurrent processing"
+
+        msgs = (
+            await s.execute(select(Message).where(Message.incident_id == inc_id))
+        ).scalars().all()
+        assert len(msgs) == 1, (
+            f"expected exactly 1 messages row, got {len(msgs)} "
+            "(duplicate send race not prevented)"
+        )

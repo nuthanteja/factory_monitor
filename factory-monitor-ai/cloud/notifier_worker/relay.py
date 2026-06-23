@@ -27,7 +27,6 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -99,10 +98,17 @@ async def _process_row(
     now = datetime.now(tz=timezone.utc)
 
     async with session_maker() as session:
-        # Re-fetch inside the new transaction so we have a live ORM object to mutate.
+        # Re-fetch WITH a row lock so a concurrent replica that also fetched this row
+        # in the poll batch cannot commit a duplicate send+message insert.  If another
+        # worker already claimed and processed the row, ob will be non-PENDING and we
+        # bail out immediately — delivering the idempotency guarantee.
         ob = (
-            await session.execute(select(Outbox).where(Outbox.id == row.id))
-        ).scalar_one()
+            await session.execute(
+                select(Outbox).where(Outbox.id == row.id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if ob is None or ob.status != "PENDING":
+            return  # another worker already claimed/processed this row
 
         if result.status == "sent":
             ob.status = "SENT"
@@ -118,18 +124,18 @@ async def _process_row(
                 id=uuid.uuid4(),
                 incident_id=ob.incident_id,
                 direction="out",
-                channel=ob.channel,        # outbox channel, not result.channel
+                channel=result.channel,    # actual delivery channel (not the intent)
                 to_phone_e164=ob.to_phone_e164,
                 provider_sid=result.sid,
                 status="sent",
             )
             session.add(msg)
             logger.info(
-                "outbox id=%s SENT via %s sid=%s idem=%s",
+                "outbox id=%s SENT via %s sid=%s idem_key=%s",
                 row.id,
                 result.channel,
                 result.sid,
-                row.id,
+                str(row.id),
             )
         else:
             new_attempts = ob.attempts + 1

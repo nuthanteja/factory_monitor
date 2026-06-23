@@ -24,6 +24,7 @@ class ProviderResult:
     sid: str | None        # provider message SID / reference; None for console
     status: str            # "sent" | "degraded" | "failed"
     channel: str           # "whatsapp" | "sms" | "console"
+    error: str | None = None   # failure detail; None on success
 
 
 @runtime_checkable

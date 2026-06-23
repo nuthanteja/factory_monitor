@@ -160,3 +160,40 @@ async def test_resolve_expired_assignment_not_returned(maker):
     async with maker() as s:
         result = await resolve(s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id=None, at=now)
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_at_starts_at_boundary_is_inclusive(maker):
+    """Verify [starts_at, ends_at) half-open window: starts_at is inclusive."""
+    now = datetime.now(timezone.utc)
+    user = await _seed_user(maker, "+10000000006")
+    starts_at = now
+    ends_at = now + timedelta(hours=2)
+    await _seed_assignment(
+        maker, user.id, "OPERATOR",
+        starts_at=starts_at,
+        ends_at=ends_at,
+        zone_id=None,  # plant-wide to avoid fallback conflicts
+    )
+    async with maker() as s:
+        result = await resolve(s, role="OPERATOR", site_id="plant-01", zone_id=None, at=starts_at)
+    assert result is not None
+    assert result.phone_e164 == "+10000000006"
+
+
+@pytest.mark.asyncio
+async def test_resolve_at_ends_at_boundary_is_exclusive(maker):
+    """Verify [starts_at, ends_at) half-open window: ends_at is exclusive."""
+    now = datetime.now(timezone.utc)
+    user = await _seed_user(maker, "+10000000007")
+    starts_at = now - timedelta(hours=1)
+    ends_at = now
+    await _seed_assignment(
+        maker, user.id, "PLANT_DIRECTOR",
+        starts_at=starts_at,
+        ends_at=ends_at,
+        zone_id=None,  # plant-wide to avoid fallback conflicts
+    )
+    async with maker() as s:
+        result = await resolve(s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id=None, at=ends_at)
+    assert result is None

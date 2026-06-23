@@ -27,10 +27,9 @@ Signature adaptations vs the Task-18 brief:
   - EscalationWorker.run_once() → list[uuid.UUID] added in this task.
   - NotifierRelay wraps relay.run_once() — added as a class in relay.py.
     It accepts a bare list of providers (not just ProviderChain).
-  - ConsoleProvider lives at cloud.notifications.console; a re-export shim
-    at cloud.notifications.console_provider was added in this task.
-  - OnCallResolver class lives at cloud.escalation_worker.on_call_resolver
-    (added in this task as a class wrapper around cloud.common.on_call_resolver.resolve).
+  - ConsoleProvider lives at cloud.notifications.console (canonical path).
+  - ACK path: the e2e calls cloud.common.incident_actions.acknowledge_incident
+    directly — the same function the HTTP route delegates to.
   - create_incident_from_anomaly requires on_call_resolver kwarg to get tier-0 outbox;
     the seed includes a tier-0 escalation_tiers row so the resolver can find it.
 """
@@ -61,11 +60,10 @@ from cloud.common.db.models import (
 )
 from cloud.common.on_call_resolver import resolve as _resolve_on_call
 from cloud.common.schemas.anomaly import AnomalyEvent, AnomalyType, Evidence, Severity
-from cloud.escalation_worker.ack_service import acknowledge_incident
-from cloud.escalation_worker.on_call_resolver import OnCallResolver
+from cloud.common.incident_actions import acknowledge_incident as _shared_acknowledge_incident
 from cloud.escalation_worker.worker import EscalationWorker
 from cloud.ingest_worker.service import create_incident_from_anomaly
-from cloud.notifications.console_provider import ConsoleProvider
+from cloud.notifications.console import ConsoleProvider
 from cloud.notifier_worker.relay import NotifierRelay
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -313,10 +311,6 @@ def _make_relay(session_maker: async_sessionmaker) -> NotifierRelay:
     )
 
 
-def _make_on_call_resolver(session_maker: async_sessionmaker) -> OnCallResolver:
-    return OnCallResolver(session_maker=session_maker)
-
-
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_escalation_thread_awaiting_to_critical(pg_session_maker):
@@ -518,10 +512,11 @@ async def test_ack_stops_escalation(pg_session_maker):
     assert inc.status == IncidentStatus.TIER1
     assert inc.next_fire_at is not None
 
-    # ── ACK: acknowledge_incident(session_maker, incident_id, actor_user_id) ──
+    # ── ACK: call the REAL shared incident-action service (same code the route uses) ──
     # Transitions to ACK, sets next_fire_at=NULL, inserts incident_events(ACK)
-    actor_id = uuid.uuid4()  # dummy actor; no FK constraint on actor_user_id
-    await acknowledge_incident(session_maker, incident_id, actor_user_id=actor_id)
+    async with session_maker() as session:
+        await _shared_acknowledge_incident(session, incident_id)
+        await session.commit()
 
     inc = await _get_incident(session_maker, incident_id)
     assert inc.status == IncidentStatus.ACK

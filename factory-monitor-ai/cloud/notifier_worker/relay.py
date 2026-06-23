@@ -189,7 +189,7 @@ class NotifierRelay:
     async def drain_once(self) -> int:
         """Drain all PENDING outbox rows that are due now.
 
-        Returns count of rows successfully delivered (status changed to SENT).
+        Returns number of outbox rows processed this pass (includes SENT, failed, and DEAD).
         """
         return await run_once(
             self._session_maker,

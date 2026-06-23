@@ -18,7 +18,7 @@ import pytest
 from cloud.common.kafka import make_producer, publish_event
 from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.ingest_worker.consumer import handle_message
-from cloud.common.db.models import Incident
+from cloud.common.db.models import Incident, IncidentEvent
 from edge.vision.debounce import DebounceConfig, TrackDebouncer
 from edge.vision.detector import Detection
 from edge.vision.engine import StubFrameSource, VisionEngine
@@ -141,5 +141,11 @@ async def test_ppe_violation_becomes_incident_end_to_end():
         assert inc.anomaly_type == "ppe_no_hardhat"
         assert inc.status.value == "AWAITING_OPERATOR"
         assert inc.current_tier == 0
+
+        # 4) AUDIT: the incident has exactly one CREATED event.
+        async with session_maker() as s:
+            evts = (await s.execute(select(IncidentEvent).where(IncidentEvent.incident_id == inc.id))).scalars().all()
+        assert len(evts) == 1
+        assert evts[0].type == "CREATED"
 
         await engine.dispose()

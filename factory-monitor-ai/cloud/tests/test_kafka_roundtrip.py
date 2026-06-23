@@ -32,6 +32,7 @@ def test_serialize_round_trip_pure() -> None:
 def kafka_bootstrap():
     from testcontainers.kafka import KafkaContainer
 
+    # testcontainers' KafkaContainer needs Confluent cp-kafka (apache/kafka lacks /etc/confluent/docker/configure)
     with KafkaContainer("confluentinc/cp-kafka:7.6.0") as kafka:
         yield kafka.get_bootstrap_server()
 

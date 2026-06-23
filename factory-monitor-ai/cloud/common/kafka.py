@@ -13,7 +13,8 @@ def serialize_event(event: AnomalyEvent) -> bytes:
 
 
 def deserialize_event(raw: bytes) -> AnomalyEvent:
-    return AnomalyEvent.model_validate_json(raw.decode("utf-8"))
+    """Decode wire bytes back to an AnomalyEvent."""
+    return AnomalyEvent.model_validate_json(raw)
 
 
 def _bootstrap(bootstrap: str | None) -> str:

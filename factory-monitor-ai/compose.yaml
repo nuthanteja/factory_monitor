@@ -164,6 +164,23 @@ services:
       EDGE_WEIGHTS: /app/edge/models/yolov8n.pt
       PPE_WEIGHTS_URL: ${PPE_WEIGHTS_URL:-}
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: factory-monitor-frontend:dev
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   pgdata:
   kafkadata:

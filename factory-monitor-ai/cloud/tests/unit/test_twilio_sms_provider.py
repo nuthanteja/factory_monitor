@@ -82,11 +82,12 @@ async def test_twilio_exception_returns_failed():
 @pytest.mark.asyncio
 async def test_healthcheck_true_when_client_works():
     provider, _ = _make_provider()
+    provider._twilio_client.api.accounts.return_value.fetch.return_value = MagicMock()
     assert await provider.healthcheck() is True
 
 
 @pytest.mark.asyncio
 async def test_healthcheck_false_on_exception():
     provider, _ = _make_provider()
-    provider._twilio_client.api = MagicMock(side_effect=Exception("auth"))
+    provider._twilio_client.api.accounts.side_effect = Exception("auth")
     assert await provider.healthcheck() is False

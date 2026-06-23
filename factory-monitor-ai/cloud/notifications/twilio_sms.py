@@ -67,7 +67,7 @@ class TwilioSmsProvider:
             kind, template_name=template_name, variables=variables, body=body
         )
         try:
-            msg = await asyncio.get_event_loop().run_in_executor(
+            msg = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self._twilio_client.messages.create(
                     from_=self._from,
@@ -89,11 +89,11 @@ class TwilioSmsProvider:
 
     async def healthcheck(self) -> bool:
         try:
-            await asyncio.get_event_loop().run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: self._twilio_client.api(
+                lambda: self._twilio_client.api.accounts(
                     self._twilio_client.account_sid
-                ),
+                ).fetch(),
             )
             return True
         except Exception:

@@ -55,8 +55,8 @@ async def test_template_send_succeeds_without_open_window():
     assert result.sid == "WA_SID_001"
     mock_msgs.create.assert_called_once()
     call_kwargs = mock_msgs.create.call_args.kwargs
-    # Must use content_sid (template) path, not body
-    assert "content_sid" in call_kwargs or "content_variables" in call_kwargs or call_kwargs.get("body", "").startswith("{{") or True
+    # "alert_operator" does NOT start with "HX", so the demo path renders a body
+    assert "body" in call_kwargs, f"Expected 'body' key in create kwargs, got: {list(call_kwargs)}"
     # The to number must be prefixed with whatsapp: scheme
     assert call_kwargs["to"].startswith("whatsapp:")
 
@@ -119,13 +119,13 @@ async def test_twilio_api_error_returns_failed_result():
 @pytest.mark.asyncio
 async def test_healthcheck_returns_true_when_client_works():
     provider, _ = _make_provider()
-    provider._twilio_client.api.accounts.__getitem__ = MagicMock(return_value=MagicMock())
+    provider._twilio_client.api.accounts.return_value.fetch.return_value = MagicMock()
     assert await provider.healthcheck() is True
 
 
 @pytest.mark.asyncio
 async def test_healthcheck_returns_false_on_exception():
     provider, _ = _make_provider()
-    provider._twilio_client.api = MagicMock(side_effect=Exception("auth failure"))
+    provider._twilio_client.api.accounts.side_effect = Exception("auth failure")
     result = await provider.healthcheck()
     assert result is False

@@ -16,6 +16,7 @@ integration; it can be None when injecting a mock `_has_open_window`.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -93,7 +94,7 @@ class TwilioWhatsAppProvider:
                 return ProviderResult(sid=None, status="degraded", channel="whatsapp")
             # Free-form send inside the window
             try:
-                msg = await asyncio.get_event_loop().run_in_executor(
+                msg = await asyncio.get_running_loop().run_in_executor(
                     None,
                     lambda: self._twilio_client.messages.create(
                         from_=self._from,
@@ -115,7 +116,6 @@ class TwilioWhatsAppProvider:
 
         # TEMPLATE — window-independent
         try:
-            import json
             create_kwargs: dict[str, Any] = dict(
                 from_=self._from,
                 to=self._to_wa(to),
@@ -133,7 +133,7 @@ class TwilioWhatsAppProvider:
                     rendered += " " + " ".join(f"{k}={v}" for k, v in variables.items())
                 create_kwargs["body"] = rendered
 
-            msg = await asyncio.get_event_loop().run_in_executor(
+            msg = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self._twilio_client.messages.create(**create_kwargs),
             )
@@ -159,11 +159,11 @@ class TwilioWhatsAppProvider:
 
     async def healthcheck(self) -> bool:
         try:
-            await asyncio.get_event_loop().run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: self._twilio_client.api(
+                lambda: self._twilio_client.api.accounts(
                     self._twilio_client.account_sid
-                ),
+                ).fetch(),
             )
             return True
         except Exception:

@@ -1,0 +1,3 @@
+# Subagent-driven execution scratch (task briefs, reports, review-package diffs).
+# progress.md is already tracked and stays tracked; this only excludes new scratch.
+.superpowers/

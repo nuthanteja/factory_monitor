@@ -1,5 +1,3 @@
-import pytest
-
 from edge.vision.debounce import (
     DebounceConfig,
     DebounceEvent,
@@ -78,3 +76,28 @@ def test_debounce_event_shape():
     assert ev.track_id == "cam_01:9"
     assert ev.rule_id == "PPE_NO_HARDHAT"
     assert ev.transition == "open"
+
+
+def test_rule_id_independence():
+    """Same track_id with different rule_ids maintain independent state."""
+    deb = TrackDebouncer(DebounceConfig(window=12, m_of_n=8, clear_consecutive=6))
+    # Feed 8× PPE_NO_HARDHAT violations on cam_01:1
+    out1 = _feed(deb, "cam_01:1", "PPE_NO_HARDHAT", [True] * 8)
+    assert out1 == ["open"]
+    # Feed 8× PPE_NO_VEST violations on same cam_01:1
+    # Should also emit "open" because this is a different rule_id state
+    out2 = _feed(deb, "cam_01:1", "PPE_NO_VEST", [True] * 8)
+    assert out2 == ["open"]
+
+
+def test_open_clear_reopen_cycle():
+    """Verify full transition cycle: open -> clear -> open."""
+    deb = TrackDebouncer(DebounceConfig(window=12, m_of_n=8, clear_consecutive=6))
+    out = []
+    # Feed 8× violations (expect "open")
+    out.extend(_feed(deb, "cam_01:1", "PPE_NO_HARDHAT", [True] * 8))
+    # Feed 6× clears (expect "clear")
+    out.extend(_feed(deb, "cam_01:1", "PPE_NO_HARDHAT", [False] * 6))
+    # Feed 8× violations again (expect "open")
+    out.extend(_feed(deb, "cam_01:1", "PPE_NO_HARDHAT", [True] * 8))
+    assert out == ["open", "clear", "open"]

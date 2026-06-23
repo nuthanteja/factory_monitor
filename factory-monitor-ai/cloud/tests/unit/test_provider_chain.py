@@ -1,7 +1,6 @@
 """Unit tests: build_provider_chain + ProviderChain fall-through logic."""
 from __future__ import annotations
 
-import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -162,4 +161,52 @@ def test_build_whatsapp_without_twilio_creds_raises():
         # no twilio_account_sid / auth_token
     )
     with pytest.raises(ValueError, match="TWILIO"):
+        build_provider_chain(settings)
+
+
+def test_build_chain_case_insensitive():
+    """Mixed-case provider names should build the same providers as lowercase."""
+    settings_lower = Settings(
+        notify_provider_chain="whatsapp,sms,console",
+        twilio_account_sid="ACtest",
+        twilio_auth_token="token",
+        twilio_whatsapp_from="+14155238886",
+        twilio_sms_from="+15005550006",
+        database_url="postgresql+asyncpg://x:x@localhost/x",
+    )
+    settings_mixed = Settings(
+        notify_provider_chain="WhatsApp,SMS,Console",
+        twilio_account_sid="ACtest",
+        twilio_auth_token="token",
+        twilio_whatsapp_from="+14155238886",
+        twilio_sms_from="+15005550006",
+        database_url="postgresql+asyncpg://x:x@localhost/x",
+    )
+    chain_lower = build_provider_chain(settings_lower)
+    chain_mixed = build_provider_chain(settings_mixed)
+
+    # Both chains should have the same providers in the same order
+    assert len(chain_lower) == len(chain_mixed) == 3
+    assert type(chain_lower[0]).__name__ == type(chain_mixed[0]).__name__ == "TwilioWhatsAppProvider"
+    assert type(chain_lower[1]).__name__ == type(chain_mixed[1]).__name__ == "TwilioSmsProvider"
+    assert type(chain_lower[2]).__name__ == type(chain_mixed[2]).__name__ == "ConsoleProvider"
+
+
+def test_build_empty_chain_raises():
+    """Empty provider chain should raise ValueError."""
+    settings = Settings(
+        notify_provider_chain="",
+        database_url="postgresql+asyncpg://x:x@localhost/x",
+    )
+    with pytest.raises(ValueError, match="notify_provider_chain is empty"):
+        build_provider_chain(settings)
+
+
+def test_build_whitespace_only_chain_raises():
+    """Whitespace-only provider chain should raise ValueError."""
+    settings = Settings(
+        notify_provider_chain=",  ,",
+        database_url="postgresql+asyncpg://x:x@localhost/x",
+    )
+    with pytest.raises(ValueError, match="notify_provider_chain is empty"):
         build_provider_chain(settings)

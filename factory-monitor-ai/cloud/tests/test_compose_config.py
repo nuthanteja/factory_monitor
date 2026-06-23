@@ -41,5 +41,8 @@ def test_env_example_declares_contract() -> None:
         "POSTGRES_DB",
         "DATABASE_URL",
         "KAFKA_BOOTSTRAP_SERVERS",
+        "ALEMBIC_DATABASE_URL",
+        "REDIS_URL",
+        "OPERATOR_GRACE_SECONDS",
     ):
         assert key in text, f".env.example missing {key}"

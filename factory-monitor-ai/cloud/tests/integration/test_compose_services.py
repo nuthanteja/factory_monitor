@@ -31,7 +31,7 @@ def test_api_service_wiring():
         set(svc["environment"].keys()) if isinstance(svc["environment"], dict)
         else {e.split("=", 1)[0] for e in svc["environment"]}
     )
-    assert {"DATABASE_URL", "KAFKA_BOOTSTRAP_SERVERS"}.issubset(env_keys)
+    assert {"DATABASE_URL", "KAFKA_BOOTSTRAP_SERVERS", "REDIS_URL"}.issubset(env_keys)
 
 
 def test_worker_service_wiring():
@@ -48,5 +48,5 @@ def test_worker_service_wiring():
     )
     assert {
         "DATABASE_URL", "KAFKA_BOOTSTRAP_SERVERS", "KAFKA_ANOMALIES_TOPIC",
-        "KAFKA_DLQ_TOPIC", "OPERATOR_GRACE_SECONDS",
+        "KAFKA_DLQ_TOPIC", "OPERATOR_GRACE_SECONDS", "REDIS_URL",
     }.issubset(env_keys)

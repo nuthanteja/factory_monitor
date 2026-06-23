@@ -111,6 +111,7 @@ services:
       KAFKA_DLQ_TOPIC: "vision.anomalies.dlq"
       KAFKA_CONSUMER_GROUP: "ingest-worker"
       OPERATOR_GRACE_SECONDS: "120"
+      REDIS_URL: "redis://redis:6379/0"
     ports:
       - "8000:8000"
     healthcheck:
@@ -140,6 +141,7 @@ services:
       KAFKA_DLQ_TOPIC: "vision.anomalies.dlq"
       KAFKA_CONSUMER_GROUP: "ingest-worker"
       OPERATOR_GRACE_SECONDS: "120"
+      REDIS_URL: "redis://redis:6379/0"
     restart: unless-stopped
 
 volumes:

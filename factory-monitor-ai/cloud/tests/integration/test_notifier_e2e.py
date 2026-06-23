@@ -34,7 +34,7 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.config import Config
 
-from cloud.common.db.models import Incident, IncidentEvent, Message, Outbox
+from cloud.common.db.models import Incident, Message, Outbox
 from cloud.common.on_call_resolver import resolve
 from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
@@ -144,9 +144,12 @@ async def test_ingest_then_relay_full_thread(maker: async_sessionmaker):
     assert msgs[0].direction == "out"
     assert msgs[0].to_phone_e164 == "+15550000001"
     assert msgs[0].status == "sent"
+    assert msgs[0].provider_sid is None
+    assert msgs[0].incident_id == incident_id
 
     # 6. Second run_once does NOT re-deliver (row is SENT, not PENDING).
     count2 = await run_once(maker, chain)
+    assert count2 == 0
     async with maker() as s:
         msgs2 = (
             await s.execute(

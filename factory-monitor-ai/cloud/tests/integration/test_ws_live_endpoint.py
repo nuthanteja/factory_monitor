@@ -8,6 +8,7 @@ it creates connections on demand inside TestClient's loop.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,38 @@ from cloud.api.main import create_app
 from cloud.common.db.models import IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
+
+
+def _drain_until(ws, match_type: str, *, timeout: float = 3.0) -> dict:
+    """Read frames from *ws* until one with ``type == match_type`` is found.
+
+    Each ``ws.receive_json()`` call blocks until the server sends a frame;
+    running it in a thread lets us impose a wall-clock deadline that is safe
+    even on a heavily loaded CI machine.  Raises ``TimeoutError`` if no
+    matching frame arrives within *timeout* seconds, or ``AssertionError`` if
+    the executor itself raises.
+    """
+    deadline = timeout
+
+    def _read_one() -> dict:
+        return ws.receive_json()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        remaining = deadline
+        while remaining > 0:
+            fut = pool.submit(_read_one)
+            try:
+                frame = fut.result(timeout=remaining)
+            except concurrent.futures.TimeoutError as exc:
+                raise TimeoutError(
+                    f"No '{match_type}' frame received within {timeout}s"
+                ) from exc
+            if frame.get("type") == match_type:
+                return frame
+            # Not our frame — keep draining.  Subtract a tiny floor so we
+            # never spin without bound even if frames arrive very quickly.
+            remaining -= 0.001
+    raise TimeoutError(f"No '{match_type}' frame received within {timeout}s")
 
 
 def _async_url(sync_url: str) -> str:
@@ -180,7 +213,7 @@ def test_connect_receives_snapshot_with_active_incident(app, seeded_incident_id)
 
 
 def test_heartbeat_follows_snapshot_with_server_now(app, seeded_incident_id):
-    # Heartbeat interval is overridden tiny so the test is fast.
+    # Heartbeat and timer intervals are set small so the test is fast.
     import cloud.api.ws as ws_mod
 
     app.state.ws_heartbeat_seconds = 0.05
@@ -188,33 +221,48 @@ def test_heartbeat_follows_snapshot_with_server_now(app, seeded_incident_id):
     with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
         first = ws.receive_json()
         assert first["type"] == "snapshot"
-        # Drain a few frames; assert a heartbeat and a timer.snapshot appear,
-        # all carry server_now, and seq is strictly monotonic.
+        # Drain frames until both system.heartbeat AND timer.snapshot have been
+        # observed (up to 3 s wall-clock).  A fixed iteration count races on
+        # slow/loaded CI machines because asyncio.sleep(0.05) may actually take
+        # several hundred ms there.
         seen = {first["type"]}
         seqs = [first["seq"]]
-        for _ in range(6):
-            m = ws.receive_json()
-            seen.add(m["type"])
-            seqs.append(m["seq"])
-            datetime.fromisoformat(m["server_now"])
-        assert "system.heartbeat" in seen
-        assert "timer.snapshot" in seen
+        NEED = {"system.heartbeat", "timer.snapshot"}
+
+        def _read_one() -> dict:
+            return ws.receive_json()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            deadline = 3.0
+            while not NEED.issubset(seen) and deadline > 0:
+                fut = pool.submit(_read_one)
+                try:
+                    m = fut.result(timeout=deadline)
+                except concurrent.futures.TimeoutError:
+                    break
+                seen.add(m["type"])
+                seqs.append(m["seq"])
+                datetime.fromisoformat(m["server_now"])
+                deadline -= 0.001  # floor to avoid zero-timeout edge case
+
+        assert "system.heartbeat" in seen, "system.heartbeat never received"
+        assert "timer.snapshot" in seen, "timer.snapshot never received"
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
     _ = ws_mod  # ensure the module import path is the one under test
 
 
 def test_timer_snapshot_payload_shape(app, seeded_incident_id):
-    app.state.ws_heartbeat_seconds = 5.0          # push heartbeats out of the way
+    # Push the heartbeat far out so only timer.snapshot frames appear after the
+    # initial snapshot.  Use _drain_until so the test is resilient to asyncio
+    # scheduler jitter on loaded CI machines: it reads frames until a
+    # timer.snapshot arrives or the 3-second wall-clock deadline expires,
+    # rather than relying on the 50 ms sleep firing within a fixed N-frame
+    # window.
+    app.state.ws_heartbeat_seconds = 5.0
     app.state.ws_timer_snapshot_seconds = 0.05
     with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
         assert ws.receive_json()["type"] == "snapshot"
-        timer = None
-        for _ in range(6):
-            m = ws.receive_json()
-            if m["type"] == "timer.snapshot":
-                timer = m
-                break
-        assert timer is not None
+        timer = _drain_until(ws, "timer.snapshot", timeout=3.0)
         rows = timer["data"]["incidents"]
         assert any(r["incident_id"] == str(seeded_incident_id) for r in rows)
         row = next(r for r in rows if r["incident_id"] == str(seeded_incident_id))

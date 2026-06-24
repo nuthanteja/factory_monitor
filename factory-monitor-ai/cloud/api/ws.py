@@ -123,8 +123,13 @@ async def ws_live(ws: WebSocket) -> None:
         done, pending = await asyncio.wait(
             {recv, beat}, return_when=asyncio.FIRST_COMPLETED
         )
+        for task in done:
+            exc = task.exception()
+            if exc is not None and not isinstance(exc, WebSocketDisconnect):
+                raise exc
         for task in pending:
             task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
     except WebSocketDisconnect:
         pass
     finally:

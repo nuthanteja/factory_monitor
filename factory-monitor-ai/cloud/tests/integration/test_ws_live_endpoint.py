@@ -102,13 +102,58 @@ def seeded_incident_id(sync_url: str) -> uuid.UUID:
 @pytest.fixture
 def app(async_url: str):
     """Build the FastAPI app with an async_sessionmaker that creates its
-    connections on-demand inside the event loop TestClient starts."""
+    connections on-demand inside the event loop TestClient starts.
+
+    A fresh engine + pool per test prevents connection-count leaks between
+    tests.  Pool cleanup happens naturally when the container tears down at
+    module scope; explicit async disposal here would race with TestClient's
+    proactor loop being closed, so we skip it.
+    """
     engine = create_async_engine(async_url, future=True)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     a = create_app()
     a.dependency_overrides[get_session_maker] = lambda: maker
     a.state.ws_session_maker = maker
     return a
+
+
+@pytest.fixture
+def seeded_resolved_incident_id(sync_url: str) -> uuid.UUID:
+    """Insert one RESOLVED incident synchronously via psycopg2."""
+    inc_id = uuid.uuid4()
+    dedup = f"cam_02|cam_02:9999|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}"
+    now = datetime.now(tz=UTC)
+    deadline = now + timedelta(seconds=120)
+
+    plain_url = sync_url.replace("postgresql+psycopg2://", "postgresql://")
+    conn = psycopg2.connect(plain_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO incidents (
+                    id, site_id, camera_id, zone_id, anomaly_type, rule_id,
+                    object_class, track_id, severity, dedup_key, status,
+                    current_tier, next_fire_at, deadline_at, snapshot_url,
+                    is_synthetic, created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, NOW(), NOW()
+                )
+                """,
+                (
+                    str(inc_id), "plant-01", "cam_02", "zone_weld_bay",
+                    "ppe_no_hardhat", "PPE_NO_HARDHAT", "person",
+                    "cam_02:9999", "high", dedup,
+                    IncidentStatus.RESOLVED.value,
+                    0, deadline, deadline, "",
+                    False,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return inc_id
 
 
 # ── tests ─────────────────────────────────────────────────────────────────────
@@ -185,3 +230,28 @@ def test_subscribe_message_is_accepted_and_acked(app, seeded_incident_id):
         ack = ws.receive_json()
         assert ack["type"] == "system.heartbeat"   # ack is sent as an immediate heartbeat re-anchor
         assert ack["data"] == {}
+
+
+def test_snapshot_excludes_resolved_and_ack(
+    app, seeded_incident_id, seeded_resolved_incident_id
+):
+    """Snapshot must include the active incident and exclude the RESOLVED one."""
+    app.state.ws_heartbeat_seconds = 5.0
+    app.state.ws_timer_snapshot_seconds = 5.0
+    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "snapshot"
+        ids = [i["incident_id"] for i in msg["data"]["incidents"]]
+        assert str(seeded_incident_id) in ids
+        assert str(seeded_resolved_incident_id) not in ids
+
+
+def test_disconnect_returns_connection_count_to_zero(app):
+    """connection_count must be 1 while connected and 0 after disconnect."""
+    app.state.ws_heartbeat_seconds = 5.0
+    app.state.ws_timer_snapshot_seconds = 5.0
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/live") as ws:
+            ws.receive_json()  # consume the snapshot
+            assert app.state.ws_manager.connection_count == 1
+        assert app.state.ws_manager.connection_count == 0

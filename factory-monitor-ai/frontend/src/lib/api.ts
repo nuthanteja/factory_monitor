@@ -21,6 +21,15 @@ export interface IncidentsResponse {
   meta: { server_now: string };
 }
 
+export interface ActionResponse {
+  incident_id: string;
+  status: string;
+}
+
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
 const INCIDENTS_URL = "/api/v1/incidents";
 
 export async function getIncidents(
@@ -34,4 +43,45 @@ export async function getIncidents(
     throw new Error(`getIncidents failed: HTTP ${res.status}`);
   }
   return (await res.json()) as IncidentsResponse;
+}
+
+export async function acknowledgeIncident(
+  id: string,
+  idempotencyKey: string = newIdempotencyKey(),
+  signal?: AbortSignal,
+): Promise<ActionResponse> {
+  const res = await fetch(`${INCIDENTS_URL}/${id}/acknowledge`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`acknowledgeIncident failed: HTTP ${res.status}`);
+  }
+  return (await res.json()) as ActionResponse;
+}
+
+export async function resolveIncident(
+  id: string,
+  resolutionNote = "",
+  idempotencyKey: string = newIdempotencyKey(),
+  signal?: AbortSignal,
+): Promise<ActionResponse> {
+  const res = await fetch(`${INCIDENTS_URL}/${id}/resolve`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify({ resolution_note: resolutionNote }),
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`resolveIncident failed: HTTP ${res.status}`);
+  }
+  return (await res.json()) as ActionResponse;
 }

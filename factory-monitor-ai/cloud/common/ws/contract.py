@@ -68,7 +68,7 @@ class IncidentView(BaseModel):
     def _empty_str_to_none(cls, v: object) -> object:
         return None if v == "" else v
 
-    @field_serializer("deadline_at", "opened_at", when_used="json")
+    @field_serializer("deadline_at", "opened_at")
     def _ser_dt(self, dt: datetime | None) -> str | None:
         return None if dt is None else _iso_z(dt)
 
@@ -92,7 +92,7 @@ def make_envelope(
     server_now: datetime | None = None,
 ) -> dict:
     """Build a wire-ready envelope dict (JSON-serializable values only)."""
-    now = server_now or datetime.now(tz=UTC)
+    now = server_now if server_now is not None else datetime.now(tz=UTC)
     return WsEnvelope(
         type=type, seq=seq, server_now=_iso_z(now), data=data
     ).model_dump()

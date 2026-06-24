@@ -31,6 +31,8 @@ def test_make_envelope_shape_and_serialization():
     assert env["data"] == {}
     # server_now is ISO-8601 UTC text, round-trippable.
     assert datetime.fromisoformat(env["server_now"]) == now
+    # server_now MUST have the Z suffix (design §5.5).
+    assert env["server_now"].endswith("Z")
 
 
 def test_make_envelope_defaults_server_now_to_now():
@@ -75,3 +77,43 @@ def test_incident_view_terminal_deadline_null():
         snapshot_url=None, tier_label="CRITICAL",
     )
     assert iv.model_dump(mode="json")["deadline_at"] is None
+
+
+def test_incident_view_model_dump_always_iso_z():
+    """IncidentView.model_dump() (no mode arg) must always emit ISO-Z strings.
+
+    This is critical: the WS broadcaster calls model_dump() without mode="json",
+    so datetimes must serialize to JSON-safe strings in both python and json modes.
+    """
+    iv = IncidentView(
+        incident_id="11111111-1111-4111-8111-111111111111",
+        camera_id="cam_01",
+        zone_id="zone_weld_bay",
+        rule_id="PPE_NO_HARDHAT",
+        anomaly_type="ppe_no_hardhat",
+        severity="high",
+        object_class="person",
+        status="AWAITING_OPERATOR",
+        current_tier=0,
+        deadline_at=datetime(2026, 6, 23, 10, 7, 0, tzinfo=UTC),
+        opened_at=datetime(2026, 6, 23, 10, 5, 0, tzinfo=UTC),
+        snapshot_url=None,
+        tier_label="Operator",
+    )
+    # model_dump() with NO mode arg should still yield ISO-Z strings.
+    dumped = iv.model_dump()
+    assert dumped["opened_at"] == "2026-06-23T10:05:00Z"
+    assert dumped["deadline_at"] == "2026-06-23T10:07:00Z"
+    # Also verify mode="json" still works.
+    dumped_json = iv.model_dump(mode="json")
+    assert dumped_json["opened_at"] == "2026-06-23T10:05:00Z"
+    assert dumped_json["deadline_at"] == "2026-06-23T10:07:00Z"
+    # And terminal deadline still passes None through.
+    iv_terminal = IncidentView(
+        incident_id="x", camera_id="cam_01", zone_id=None, rule_id="PPE_NO_HARDHAT",
+        anomaly_type="ppe_no_hardhat", severity="high", object_class="person",
+        status="CRITICAL_UNRESOLVED", current_tier=3, deadline_at=None,
+        opened_at=datetime(2026, 6, 23, 10, 5, 0, tzinfo=UTC),
+        snapshot_url=None, tier_label="CRITICAL",
+    )
+    assert iv_terminal.model_dump()["deadline_at"] is None

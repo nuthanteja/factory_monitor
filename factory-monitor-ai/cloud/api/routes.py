@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.api.deps import get_session_maker
+from cloud.common.config import get_settings
 from cloud.common.db.models import Incident
 from cloud.common.incident_actions import (
     acknowledge_incident as _ack_incident,
@@ -16,7 +17,14 @@ from cloud.common.incident_actions import (
 from cloud.common.incident_actions import (
     resolve_incident as _resolve_incident,
 )
+from cloud.common.redis_client import get_redis
 from cloud.common.schemas.incident import IncidentListResponse, IncidentOut
+from cloud.common.ws_events import (
+    CHANGE_RESOLVED,
+    CHANGE_UPDATED,
+    incident_change,
+)
+from cloud.common.ws_publisher import publish_incident_event
 
 router = APIRouter()
 
@@ -28,6 +36,31 @@ class _ActionOut(BaseModel):
 
 class _ResolveBody(BaseModel):
     resolution_note: str = ""
+
+
+async def _publish_after(
+    publisher: object,
+    change_type: str,
+    incident_id: uuid.UUID,
+    **fields: object,
+) -> None:
+    """Best-effort publish of a compact change AFTER the txn committed.
+
+    `publisher` is either a bound callable (tests inject a recorder) or None;
+    in the live app the route builds one from the shared Redis client. Any
+    failure is swallowed by publish_incident_event / the callable contract.
+    """
+    change = incident_change(change_type, incident_id, **fields)
+    if publisher is None:
+        settings = get_settings()
+        await publish_incident_event(
+            get_redis(settings), settings.ws_redis_channel, change
+        )
+    elif callable(publisher):
+        try:
+            await publisher(change)
+        except Exception:  # noqa: BLE001 — best-effort even with an injected publisher
+            pass
 
 
 @router.get("/healthz")
@@ -67,6 +100,7 @@ async def acknowledge_incident(
         inc = await _ack_incident(session, incident_id, idempotency_key=idempotency_key)
         await session.commit()
 
+    await _publish_after(None, CHANGE_UPDATED, inc.id, status="ACK")
     return _ActionOut(incident_id=str(inc.id), status="ACK")
 
 
@@ -91,4 +125,5 @@ async def resolve_incident(
         )
         await session.commit()
 
+    await _publish_after(None, CHANGE_RESOLVED, inc.id, resolved_at=inc.resolved_at)
     return _ActionOut(incident_id=str(inc.id), status="RESOLVED")

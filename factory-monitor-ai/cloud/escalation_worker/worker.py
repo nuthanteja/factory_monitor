@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cloud.common.db.models import Incident, IncidentStatus
+from cloud.common.ws_events import CHANGE_TIER_ADVANCED, incident_change
 from cloud.escalation_worker.transition import TransitionResult, fire_transition
 
 logger = logging.getLogger(__name__)
@@ -165,13 +166,24 @@ class EscalationWorker:
         lease_seconds: int = 30,
         batch: int = 10,
         batch_size: int | None = None,  # alias for batch; batch_size wins if both given
+        publisher: object | None = None,
     ) -> None:
         self._session_maker = session_maker
         self._worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self._poll_interval = poll_interval_seconds
         self._lease_seconds = lease_seconds
         self._batch = batch_size if batch_size is not None else batch
+        self._publisher = publisher
         self._running = False
+
+    async def _publish_fired(self, fired_ids: list[uuid.UUID]) -> None:
+        if self._publisher is None or not fired_ids:
+            return
+        for inc_id in fired_ids:
+            try:
+                await self._publisher(incident_change(CHANGE_TIER_ADVANCED, inc_id))
+            except Exception:  # noqa: BLE001 — fan-out never blocks the worker
+                logger.warning("escalation live publish failed id=%s", inc_id, exc_info=True)
 
     async def run_once(self) -> list[uuid.UUID]:
         """Execute one poll batch and return list of incident IDs that were fired.
@@ -200,14 +212,15 @@ class EscalationWorker:
         """Poll loop — runs until stop() sets _running=False."""
         while self._running:
             try:
-                processed = await poll_once(
+                fired = await poll_once_ids(
                     self._session_maker,
                     worker_id=self._worker_id,
                     lease_seconds=self._lease_seconds,
                     batch=self._batch,
                 )
-                if processed:
-                    logger.debug("worker %s processed %d incidents", self._worker_id, processed)
+                if fired:
+                    logger.debug("worker %s fired %d incidents", self._worker_id, len(fired))
+                    await self._publish_fired(fired)
             except Exception:
                 logger.exception("worker %s poll error — continuing", self._worker_id)
             await asyncio.sleep(self._poll_interval)

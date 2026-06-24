@@ -51,7 +51,7 @@ escalation_role_enum = Enum(
 )
 msg_channel_enum = Enum("whatsapp", "sms", "console", name="msg_channel")
 msg_direction_enum = Enum("in", "out", name="msg_direction")
-outbox_status_enum = Enum("PENDING", "SENT", "DEAD", name="outbox_status")
+outbox_status_enum = Enum("PENDING", "SENDING", "SENT", "DEAD", name="outbox_status")
 
 
 class Incident(Base):

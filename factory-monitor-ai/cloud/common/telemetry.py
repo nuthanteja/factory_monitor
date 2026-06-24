@@ -64,9 +64,15 @@ def setup_telemetry(
 
 
 def reset_telemetry() -> None:
-    """Allow the next setup_telemetry() to re-install a provider (test helper)."""
+    """Allow the next setup_telemetry() to re-install a provider (test helper).
+
+    Clears OTel's global provider too, so a standalone reset is honest/symmetric —
+    after this, get_tracer() is backed by a fresh default until setup runs again.
+    """
     global _initialized
     _initialized = False
+    trace._TRACER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
+    trace._TRACER_PROVIDER = None  # noqa: SLF001
 
 
 def inject_trace_headers() -> list[tuple[str, bytes]]:

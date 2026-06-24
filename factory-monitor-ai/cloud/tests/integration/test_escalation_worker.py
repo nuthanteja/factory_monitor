@@ -26,7 +26,7 @@ from cloud.common.db.models import (
     Outbox,
 )
 from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
-from cloud.escalation_worker.worker import EscalationWorker, poll_once
+from cloud.escalation_worker.worker import EscalationWorker, poll_once, poll_once_ids
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
 
@@ -246,3 +246,22 @@ async def test_poll_once_skips_resolved_incident(maker):
     assert after.next_fire_at is None
     assert len(events) == 0, "no audit events should be written for a resolved incident"
     assert len(outbox_rows) == 0, "no outbox rows should be written for a resolved incident"
+
+
+@pytest.mark.asyncio
+async def test_fault_hook_invoked_with_incident_id_before_commit(maker):
+    """The chaos seam fires with the incident id; a non-blocking hook still commits."""
+    inc = await _insert_due_incident(maker, IncidentStatus.AWAITING_OPERATOR, 0)
+    seen: list[uuid.UUID] = []
+
+    async def hook(incident_id: uuid.UUID) -> None:
+        seen.append(incident_id)
+
+    fired = await poll_once_ids(
+        maker, worker_id="seam", lease_seconds=30, batch=10, fault_hook=hook
+    )
+
+    assert inc.id in seen
+    assert inc.id in fired
+    async with maker() as s:
+        assert (await s.get(Incident, inc.id)).status == IncidentStatus.TIER1

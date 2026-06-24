@@ -102,7 +102,9 @@ async def test_poll_broadcasts_rows_changed_since_watermark(maker):
     inc = await _insert(maker, f"k|{uuid.uuid4().hex}|PPE|b")
     mgr = FakeManager()
 
-    count, new_wm = await poll_changes_once(maker, mgr, since=since, batch=200)
+    count, new_wm, new_wm_id = await poll_changes_once(
+        maker, mgr, since=since, since_id=uuid.UUID(int=0), batch=200
+    )
 
     assert count >= 1
     ids = {data["incident_id"] for (_type, data) in mgr.calls}
@@ -120,16 +122,20 @@ async def test_poll_broadcasts_rows_changed_since_watermark(maker):
 async def test_poll_is_incremental_on_watermark(maker):
     """Watermark advances so already-broadcast rows are never re-sent."""
     # First poll drains existing rows and advances the watermark.
-    _, wm1 = await poll_changes_once(
-        maker, FakeManager(), since=datetime.now(UTC) - timedelta(seconds=1), batch=200
+    _, wm1, wm1_id = await poll_changes_once(
+        maker, FakeManager(), since=datetime.now(UTC) - timedelta(seconds=1),
+        since_id=uuid.UUID(int=0), batch=200,
     )
 
     # Quiet poll: nothing changed after wm1 → no broadcasts, watermark unchanged.
     mgr_quiet = FakeManager()
-    count_quiet, wm2 = await poll_changes_once(maker, mgr_quiet, since=wm1, batch=200)
+    count_quiet, wm2, wm2_id = await poll_changes_once(
+        maker, mgr_quiet, since=wm1, since_id=wm1_id, batch=200
+    )
     assert count_quiet == 0
     assert mgr_quiet.calls == []
     assert wm2 == wm1
+    assert wm2_id == wm1_id
 
     # Touch one incident → next poll from wm2 picks up exactly that row.
     inc = await _insert(maker, f"k|{uuid.uuid4().hex}|PPE|b")
@@ -141,7 +147,9 @@ async def test_poll_is_incremental_on_watermark(maker):
         await s.commit()
 
     mgr2 = FakeManager()
-    count_after, wm3 = await poll_changes_once(maker, mgr2, since=wm2, batch=200)
+    count_after, wm3, wm3_id = await poll_changes_once(
+        maker, mgr2, since=wm2, since_id=wm2_id, batch=200
+    )
     assert count_after >= 1
     assert str(inc.id) in {data["incident_id"] for (_t, data) in mgr2.calls}
     assert wm3 >= wm2
@@ -203,14 +211,13 @@ async def test_db_error_is_isolated_and_loop_continues(maker):
 
     original_poll = fallback_module.poll_changes_once
 
-    async def _flaky_poll(sm, mgr, *, since, batch):  # noqa: ANN001
+    async def _flaky_poll(sm, mgr, *, since, since_id, batch):  # noqa: ANN001
         poll_calls.append(1)
         if len(poll_calls) == 1:
             raise RuntimeError("simulated transient DB error")
-        # Insert after the fallback's watermark is established so updated_at > since.
         inc = await _insert(sm, f"k|{uuid.uuid4().hex}|PPE|b")
         inserted_incident.append(inc)
-        return await original_poll(sm, mgr, since=since, batch=batch)
+        return await original_poll(sm, mgr, since=since, since_id=since_id, batch=batch)
 
     mgr = FakeManager()
     stop = asyncio.Event()
@@ -245,3 +252,41 @@ async def test_db_error_is_isolated_and_loop_continues(maker):
     broadcast_ids = {data["incident_id"] for (_type, data) in mgr.calls}
     assert str(inserted_incident[0].id) in broadcast_ids, "second poll's change must be broadcast"
     assert all(ws_type is WsType.INCIDENT_UPDATED for (ws_type, _) in mgr.calls)
+
+
+@pytest.mark.asyncio
+async def test_same_timestamp_burst_is_not_skipped(maker):
+    """Rows sharing the EXACT same updated_at are all delivered across paged polls.
+
+    With a single-column (updated_at > since) cursor, the watermark would jump to
+    that shared timestamp after the first page and the overflow rows would be lost.
+    The compound (updated_at, id) keyset must deliver all of them.
+    """
+    # Three incidents, all stamped to the SAME updated_at microsecond.
+    incs = [await _insert(maker, f"burst|{uuid.uuid4().hex}|PPE|b") for _ in range(3)]
+    async with maker() as s:
+        await s.execute(
+            text(
+                "UPDATE incidents SET updated_at = timestamptz '2031-01-01 00:00:00+00' "
+                "WHERE id = ANY(:ids)"
+            ),
+            {"ids": [i.id for i in incs]},
+        )
+        await s.commit()
+
+    since = datetime(2030, 1, 1, tzinfo=UTC)
+    since_id = uuid.UUID(int=0)
+    seen: set[str] = set()
+
+    # Page through with batch=2 — the single-column cursor would skip the 3rd row.
+    for _ in range(3):
+        mgr = FakeManager()
+        count, since, since_id = await poll_changes_once(
+            maker, mgr, since=since, since_id=since_id, batch=2
+        )
+        seen.update(data["incident_id"] for (_t, data) in mgr.calls)
+        if count == 0:
+            break
+
+    for inc in incs:
+        assert str(inc.id) in seen, "a same-timestamp row was skipped by the cursor"

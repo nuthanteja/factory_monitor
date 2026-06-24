@@ -51,7 +51,7 @@ escalation_role_enum = Enum(
 )
 msg_channel_enum = Enum("whatsapp", "sms", "console", name="msg_channel")
 msg_direction_enum = Enum("in", "out", name="msg_direction")
-outbox_status_enum = Enum("PENDING", "SENT", "DEAD", name="outbox_status")
+outbox_status_enum = Enum("PENDING", "SENDING", "SENT", "DEAD", name="outbox_status")
 
 
 class Incident(Base):
@@ -179,6 +179,8 @@ class Outbox(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     provider_sid: Mapped[str | None] = mapped_column(Text)
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

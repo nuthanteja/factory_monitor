@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -66,6 +67,7 @@ async def poll_once(
     worker_id: str,
     lease_seconds: int = 30,
     batch: int = 10,
+    fault_hook: Callable[[uuid.UUID], Awaitable[None]] | None = None,
 ) -> int:
     """Claim + transition one batch of due incidents.  Returns rows processed."""
     return len(await poll_once_ids(
@@ -73,6 +75,7 @@ async def poll_once(
         worker_id=worker_id,
         lease_seconds=lease_seconds,
         batch=batch,
+        fault_hook=fault_hook,
     ))
 
 
@@ -82,6 +85,7 @@ async def poll_once_ids(
     worker_id: str,
     lease_seconds: int = 30,
     batch: int = 10,
+    fault_hook: Callable[[uuid.UUID], Awaitable[None]] | None = None,
 ) -> list[uuid.UUID]:
     """Claim + transition one batch of due incidents.
 
@@ -128,6 +132,11 @@ async def poll_once_ids(
                 ):
                     continue
                 result: TransitionResult = await fire_transition(txn_session, incident)
+                # Chaos seam (inert in production): a kill here leaves the claim
+                # committed but the transition uncommitted → rolled back on exit →
+                # reclaimed by a survivor after the lease expires (Task 5 proves it).
+                if fault_hook is not None:
+                    await fault_hook(incident_id)
                 await txn_session.commit()
                 if result.fired:
                     fired_ids.append(incident_id)
@@ -167,6 +176,7 @@ class EscalationWorker:
         batch: int = 10,
         batch_size: int | None = None,  # alias for batch; batch_size wins if both given
         publisher: object | None = None,
+        fault_hook: Callable[[uuid.UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._session_maker = session_maker
         self._worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
@@ -174,6 +184,7 @@ class EscalationWorker:
         self._lease_seconds = lease_seconds
         self._batch = batch_size if batch_size is not None else batch
         self._publisher = publisher
+        self._fault_hook = fault_hook
         self._running = False
 
     async def _publish_fired(self, fired_ids: list[uuid.UUID]) -> None:
@@ -198,6 +209,7 @@ class EscalationWorker:
             worker_id=self._worker_id,
             lease_seconds=self._lease_seconds,
             batch=self._batch,
+            fault_hook=self._fault_hook,
         )
 
     async def start(self) -> None:
@@ -217,6 +229,7 @@ class EscalationWorker:
                     worker_id=self._worker_id,
                     lease_seconds=self._lease_seconds,
                     batch=self._batch,
+                    fault_hook=self._fault_hook,
                 )
                 if fired:
                     logger.debug("worker %s fired %d incidents", self._worker_id, len(fired))

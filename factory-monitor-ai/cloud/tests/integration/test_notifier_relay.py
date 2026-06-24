@@ -6,7 +6,8 @@ Test matrix:
   3. At max_attempts: row becomes DEAD, no further attempts.
   4. Two PENDING rows for different incidents: both delivered, two messages rows.
   5. Row with next_attempt_at in the future is skipped.
-  6. Concurrent relay replicas on the same row → exactly one send, one messages row (TOCTOU race).
+  6. Concurrent relay replicas → two-phase claim means only one wins; one send, one messages row.
+  7. SENDING row with expired lease is reclaimed and sent (crash-recovery path).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from cloud.common.db.models import Message, Outbox
 from cloud.notifications.chain import ProviderChain
 from cloud.notifications.console import ConsoleProvider
 from cloud.notifications.provider import ProviderResult
-from cloud.notifier_worker.relay import _process_row, run_once
+from cloud.notifier_worker.relay import run_once
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
 
@@ -250,40 +251,58 @@ async def test_future_next_attempt_at_is_skipped(maker: async_sessionmaker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_concurrent_relay_replicas_send_exactly_once(maker: async_sessionmaker):
-    """Two relay coroutines race on the same PENDING row; only one must win.
+    """Two concurrent run_once passes race to claim the same PENDING row.
 
-    The FOR UPDATE re-lock in _process_row ensures the second coroutine sees
-    the row as non-PENDING (already SENT) and exits without inserting a
-    duplicate messages row or triggering a second provider send.
+    The two-phase claim (UPDATE ... SET status='SENDING' over FOR UPDATE SKIP LOCKED
+    rows) means only one pass claims the row; the other claims nothing. Exactly one
+    send, exactly one messages row.
     """
     async with maker() as s:
         inc_id = await _seed_incident(s)
         ob_id = await _seed_outbox(s, inc_id)
         await s.commit()
 
-    # Fetch the row snapshot that both "replicas" will receive from their poll pass.
-    async with maker() as s:
-        ob_snapshot = (
-            await s.execute(select(Outbox).where(Outbox.id == ob_id))
-        ).scalar_one()
-
     chain = ProviderChain([ConsoleProvider()])
 
-    # Run two _process_row calls concurrently against the same snapshot — exactly as
-    # two relay replicas would behave after each fetching the same row in their poll.
     await asyncio.gather(
-        _process_row(maker, chain, ob_snapshot, backoff_base=10),
-        _process_row(maker, chain, ob_snapshot, backoff_base=10),
+        run_once(maker, chain, worker_id="A"),
+        run_once(maker, chain, worker_id="B"),
     )
 
     async with maker() as s:
         ob = (await s.execute(select(Outbox).where(Outbox.id == ob_id))).scalar_one()
-        assert ob.status == "SENT", "outbox row must be SENT after concurrent processing"
-
+        assert ob.status == "SENT"
+        assert ob.claimed_by is None
         msgs = (
             await s.execute(select(Message).where(Message.incident_id == inc_id))
         ).scalars().all()
-        assert len(msgs) == 1, (
-            f"expected exactly 1 messages row, got {len(msgs)} "
-            "(duplicate send race not prevented)"
+        assert len(msgs) == 1, f"expected exactly 1 messages row, got {len(msgs)}"
+
+
+# ── Test 7: A row left in SENDING with an expired lease is reclaimed and sent ──────
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_sending_row_is_reclaimed(maker: async_sessionmaker):
+    """A SENDING row whose lease expired (a crashed in-flight send) is reclaimed."""
+    async with maker() as s:
+        inc_id = await _seed_incident(s)
+        ob_id = await _seed_outbox(s, inc_id)
+        # Force the row into SENDING with a lease that already expired.
+        await s.execute(
+            text(
+                "UPDATE outbox SET status='SENDING', claimed_by='dead', "
+                "claimed_until = now() - interval '5 seconds' WHERE id = :id"
+            ),
+            {"id": str(ob_id)},
         )
+        await s.commit()
+
+    chain = ProviderChain([ConsoleProvider()])
+    processed = await run_once(maker, chain, worker_id="reaper", lease_seconds=30)
+    assert processed == 1
+
+    async with maker() as s:
+        ob = (await s.execute(select(Outbox).where(Outbox.id == ob_id))).scalar_one()
+    assert ob.status == "SENT"
+    assert ob.claimed_by is None

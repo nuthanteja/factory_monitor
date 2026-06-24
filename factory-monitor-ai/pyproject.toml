@@ -62,6 +62,7 @@ addopts = "-ra"
 log_level = "INFO"
 markers = [
     "integration: spins up testcontainers (Docker required)",
+    "chaos: deterministic fault-injection reliability proofs (Docker required)",
 ]
 
 [tool.ruff]

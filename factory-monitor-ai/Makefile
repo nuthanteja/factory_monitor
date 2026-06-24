@@ -1,6 +1,6 @@
 COMPOSE := docker compose
 
-.PHONY: up down logs test migrate topics fmt lint typecheck publish-fixture consume-print
+.PHONY: up down logs test migrate topics fmt lint typecheck publish-fixture consume-print chaos
 
 # Bring up all long-running services and wait for them to be healthy.
 # kafka-init and migrate are one-shot services (profile "init") and must be
@@ -40,3 +40,9 @@ publish-fixture:
 
 consume-print:
 	python -m cloud.tools.consume_print
+
+# Run the deterministic chaos / exactly-once reliability proofs (Docker required).
+# Cross-platform: `make` wraps the same command you can run directly on Windows:
+#   ./.venv/Scripts/python.exe -m pytest -m chaos -v
+chaos:
+	python -m pytest -m chaos -v

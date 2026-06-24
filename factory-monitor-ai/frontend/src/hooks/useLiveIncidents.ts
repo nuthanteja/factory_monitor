@@ -90,6 +90,12 @@ export function useLiveIncidents(
     closedByUsRef.current = false;
 
     const connect = () => {
+      // Belt-and-suspenders: reset live state on every new socket so a
+      // reconnected session's snapshot (seq=1) is never dropped by a stale
+      // high-water mark carried over from the previous connection.
+      stateRef.current = initialLiveState;
+      lastSeqRef.current = 0;
+
       const ws = wsFactory(url);
       socketRef.current = ws;
 

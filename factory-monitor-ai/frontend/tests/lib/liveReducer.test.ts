@@ -146,6 +146,25 @@ describe("applyEnvelope", () => {
     expect(r.state.incidents[B]).toBeDefined();
   });
 
+  it("snapshot unconditionally re-anchors even when lastSeq is high (reconnect regression)", () => {
+    // Session 1 reached lastSeq=50; simulate a reconnect where the server
+    // resets its per-connection seq to 1.  The fresh snapshot MUST replace
+    // incidents and re-anchor lastSeq — never be dropped by the stale guard.
+    const staleState: LiveState = applyEnvelope(
+      initialLiveState,
+      env("snapshot", 50, { incidents: [view(A)] }),
+    ).state;
+    expect(staleState.lastSeq).toBe(50);
+
+    const r = applyEnvelope(staleState, env("snapshot", 1, { incidents: [view(B)] }));
+    expect(r.applied).toBe(true);
+    expect(r.gap).toBe(false);
+    expect(Object.keys(r.state.incidents)).toHaveLength(1);
+    expect(r.state.incidents[B]).toBeDefined();
+    expect(r.state.incidents[A]).toBeUndefined(); // old incident replaced
+    expect(r.state.lastSeq).toBe(1);
+  });
+
   it("advances on system.heartbeat without touching the map", () => {
     const s = applyEnvelope(
       initialLiveState,

@@ -228,6 +228,68 @@ describe("useLiveIncidents", () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
+  // Reconnect regression: snapshot with seq=1 must not freeze after a high lastSeq
+  it("re-anchors live state when a new snapshot arrives after reconnect (no freeze)", () => {
+    const { wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () =>
+        useLiveIncidents({
+          wsFactory: mockWsFactory,
+          baseBackoffMs: 100,
+        }),
+      { wrapper },
+    );
+
+    // --- Session 1: reach lastSeq=50 ---
+    const ws1 = MockWebSocket.last();
+    act(() => ws1.open());
+    act(() =>
+      ws1.emit({
+        type: "snapshot",
+        version: 1,
+        seq: 1,
+        server_now: "2026-06-22T10:16:00.000Z",
+        data: { incidents: [view(A)] },
+      }),
+    );
+    // Advance seq to 50 via heartbeats
+    for (let seq = 2; seq <= 50; seq++) {
+      act(() =>
+        ws1.emit({
+          type: "system.heartbeat",
+          version: 1,
+          seq,
+          server_now: "2026-06-22T10:16:00.000Z",
+          data: {},
+        }),
+      );
+    }
+    expect(result.current.incidents).toHaveLength(1);
+    expect(result.current.incidents[0].incident_id).toBe(A);
+
+    // --- Reconnect: socket closes, new socket opens ---
+    act(() => ws1.serverClose());
+    act(() => vi.advanceTimersByTime(100));
+    const ws2 = MockWebSocket.last();
+    act(() => ws2.open());
+
+    // Server sends fresh snapshot with seq=1 on the new connection.
+    // Without the fix, stale lastSeq=50 would drop this (1 <= 50) → freeze.
+    act(() =>
+      ws2.emit({
+        type: "snapshot",
+        version: 1,
+        seq: 1,
+        server_now: "2026-06-22T10:17:00.000Z",
+        data: { incidents: [view(B)] },
+      }),
+    );
+
+    // Incidents must be replaced (not frozen) and re-anchored to seq=1.
+    expect(result.current.incidents).toHaveLength(1);
+    expect(result.current.incidents[0].incident_id).toBe(B);
+  });
+
   // Fix 4: backoff delay is capped at maxBackoffMs
   it("caps reconnect delay at maxBackoffMs", () => {
     const { wrapper } = makeWrapper();

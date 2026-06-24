@@ -1,5 +1,6 @@
 import { tierLabelFromIncident } from "./serverClock";
 import type { AnyWsEnvelope, IncidentView } from "./wsContract";
+import { isForwardGap } from "./wsContract";
 
 export interface LiveState {
   incidents: Record<string, IncidentView>;
@@ -37,6 +38,21 @@ export function applyEnvelope(
   state: LiveState,
   env: AnyWsEnvelope,
 ): ApplyResult {
+  // A snapshot is authoritative full state — it MUST re-anchor unconditionally
+  // regardless of the current lastSeq (handles reconnects where the server resets
+  // seq to 1 but the client still carries a stale high-water mark from before).
+  if (env.type === "snapshot") {
+    const incidents: Record<string, IncidentView> = {};
+    for (const v of env.data.incidents) {
+      incidents[v.incident_id] = v;
+    }
+    return {
+      state: { incidents, lastSeq: env.seq, lastServerNowIso: env.server_now },
+      gap: false,
+      applied: true,
+    };
+  }
+
   const first = state.lastSeq === 0;
 
   // Idempotent re-delivery: a non-first envelope at or below lastSeq is dropped.
@@ -44,25 +60,22 @@ export function applyEnvelope(
     return { state, gap: false, applied: false };
   }
 
-  const gap = !first && env.seq > state.lastSeq + 1;
+  const gap = !first && isForwardGap(state.lastSeq, env.seq);
 
+  // After the snapshot early-return above, env.type is narrowed to
+  // everything except "snapshot".
+  type NonSnapshotEnvelope = Exclude<AnyWsEnvelope, { type: "snapshot" }>;
+  const nonSnapshotEnv = env as NonSnapshotEnvelope;
   let incidents = state.incidents;
-  switch (env.type) {
-    case "snapshot": {
-      incidents = {};
-      for (const v of env.data.incidents) {
-        incidents[v.incident_id] = v;
-      }
-      break;
-    }
+  switch (nonSnapshotEnv.type) {
     case "incident.created":
     case "incident.updated": {
-      const v = env.data;
+      const v = nonSnapshotEnv.data;
       incidents = { ...incidents, [v.incident_id]: v };
       break;
     }
     case "incident.tier_advanced": {
-      const d = env.data;
+      const d = nonSnapshotEnv.data;
       incidents = patch(incidents, d.incident_id, {
         current_tier: d.current_tier,
         status: d.status,
@@ -72,7 +85,7 @@ export function applyEnvelope(
       break;
     }
     case "incident.resolved": {
-      const d = env.data;
+      const d = nonSnapshotEnv.data;
       incidents = patch(incidents, d.incident_id, {
         status: "RESOLVED",
         deadline_at: null,
@@ -84,7 +97,7 @@ export function applyEnvelope(
       break;
     }
     case "timer.snapshot": {
-      for (const row of env.data.incidents) {
+      for (const row of nonSnapshotEnv.data.incidents) {
         incidents = patch(incidents, row.incident_id, {
           deadline_at: row.deadline_at,
           current_tier: row.current_tier,
@@ -100,8 +113,8 @@ export function applyEnvelope(
   return {
     state: {
       incidents,
-      lastSeq: env.seq,
-      lastServerNowIso: env.server_now,
+      lastSeq: nonSnapshotEnv.seq,
+      lastServerNowIso: nonSnapshotEnv.server_now,
     },
     gap,
     applied: true,

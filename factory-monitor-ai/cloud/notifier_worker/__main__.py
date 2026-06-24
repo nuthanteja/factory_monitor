@@ -6,7 +6,7 @@ import logging
 
 from cloud.common.config import get_settings
 from cloud.common.db.session import session_factory
-from cloud.notifications.chain import build_provider_chain, ProviderChain
+from cloud.notifications.chain import ProviderChain, build_provider_chain
 from cloud.notifier_worker.relay import run_forever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")

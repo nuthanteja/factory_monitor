@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -32,7 +32,7 @@ CFG = CameraConfig(
 
 def test_build_anomaly_event_contract():
     det = Detection("person", (880, 412, 130, 348), 0.91, no_hardhat=True)
-    now = datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=UTC)
     ev = build_anomaly_event(CFG, "zone_weld_bay", det, "cam_01:1487", now)
     assert isinstance(ev, AnomalyEvent)
     assert ev.schema_version == "1.0"

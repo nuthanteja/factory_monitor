@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
@@ -66,7 +66,9 @@ async def test_seed_creates_three_on_call_assignments(maker):
 @pytest.mark.asyncio
 async def test_seed_creates_three_tiers(maker):
     async with maker() as s:
-        tiers = (await s.execute(select(EscalationTier).order_by(EscalationTier.tier))).scalars().all()
+        tiers = (
+            await s.execute(select(EscalationTier).order_by(EscalationTier.tier))
+        ).scalars().all()
     assert len(tiers) == 3
     assert tiers[0].tier == 0
     assert tiers[0].role == "OPERATOR"
@@ -91,7 +93,9 @@ async def test_seed_is_idempotent(maker):
     await seed_demo_tiers(maker, site_id="plant-01", delay_seconds=5)
     async with maker() as s:
         users = (await s.execute(select(func.count()).select_from(User))).scalar_one()
-        assignments = (await s.execute(select(func.count()).select_from(OnCallAssignment))).scalar_one()
+        assignments = (
+            await s.execute(select(func.count()).select_from(OnCallAssignment))
+        ).scalar_one()
         tiers = (await s.execute(select(func.count()).select_from(EscalationTier))).scalar_one()
     assert users == 3
     assert assignments == 3

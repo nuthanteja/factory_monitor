@@ -5,10 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cloud.common.config import Settings
 from cloud.notifications.chain import ProviderChain, build_provider_chain
 from cloud.notifications.provider import NotificationKind, ProviderResult
-from cloud.common.config import Settings
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -144,9 +143,9 @@ def test_build_whatsapp_sms_console_chain():
         twilio_sms_from="+15005550006",
         database_url="postgresql+asyncpg://x:x@localhost/x",
     )
-    from cloud.notifications.twilio_whatsapp import TwilioWhatsAppProvider
-    from cloud.notifications.twilio_sms import TwilioSmsProvider
     from cloud.notifications.console import ConsoleProvider
+    from cloud.notifications.twilio_sms import TwilioSmsProvider
+    from cloud.notifications.twilio_whatsapp import TwilioWhatsAppProvider
     chain = build_provider_chain(settings)
     assert len(chain) == 3
     assert isinstance(chain[0], TwilioWhatsAppProvider)
@@ -187,7 +186,9 @@ def test_build_chain_case_insensitive():
 
     # Both chains should have the same providers in the same order
     assert len(chain_lower) == len(chain_mixed) == 3
-    assert type(chain_lower[0]).__name__ == type(chain_mixed[0]).__name__ == "TwilioWhatsAppProvider"
+    assert (
+        type(chain_lower[0]).__name__ == type(chain_mixed[0]).__name__ == "TwilioWhatsAppProvider"
+    )
     assert type(chain_lower[1]).__name__ == type(chain_mixed[1]).__name__ == "TwilioSmsProvider"
     assert type(chain_lower[2]).__name__ == type(chain_mixed[2]).__name__ == "ConsoleProvider"
 

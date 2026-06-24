@@ -9,7 +9,7 @@ Tier 2 = PLANT_DIRECTOR (last escalation before CRITICAL_UNRESOLVED).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -56,7 +56,7 @@ _DEMO_TIERS = [
 
 async def seed_demo_roster(session_maker: async_sessionmaker) -> None:
     """Insert 3 demo users + plant-wide on-call assignments (30-day window)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     starts_at = now - timedelta(days=1)
     ends_at = now + timedelta(days=30)
 

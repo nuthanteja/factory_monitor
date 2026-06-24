@@ -8,7 +8,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")
 
 
 def _load_compose() -> dict:
-    with open(os.path.join(ROOT, "compose.yaml"), "r", encoding="utf-8") as fh:
+    with open(os.path.join(ROOT, "compose.yaml"), encoding="utf-8") as fh:
         return yaml.safe_load(fh)
 
 

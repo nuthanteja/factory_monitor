@@ -8,13 +8,12 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.kafka import KafkaContainer
 from testcontainers.postgres import PostgresContainer
-
-from alembic import command
-from alembic.config import Config
 
 from cloud.common.db.models import Incident, Outbox
 from cloud.common.on_call_resolver import resolve as on_call_resolve

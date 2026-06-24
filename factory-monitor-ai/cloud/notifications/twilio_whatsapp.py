@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from cloud.notifications.provider import NotificationKind, ProviderResult
@@ -60,12 +60,13 @@ class TwilioWhatsAppProvider:
         if self._session_maker is None:
             return False
         from sqlalchemy import select
+
         from cloud.common.db.models import WhatsappSession
 
         async with self._session_maker() as session:
             stmt = select(WhatsappSession).where(
                 WhatsappSession.phone_e164 == phone,
-                WhatsappSession.window_expires_at > datetime.now(tz=timezone.utc),
+                WhatsappSession.window_expires_at > datetime.now(tz=UTC),
             )
             row = (await session.execute(stmt)).scalar_one_or_none()
             return row is not None

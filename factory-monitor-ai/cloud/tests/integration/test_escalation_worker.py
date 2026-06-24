@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -63,8 +63,10 @@ async def maker(migrated_url: str) -> async_sessionmaker[AsyncSession]:
     await engine.dispose()
 
 
-async def _insert_due_incident(maker: async_sessionmaker, status: IncidentStatus, tier: int) -> Incident:
-    now = datetime.now(timezone.utc)
+async def _insert_due_incident(
+    maker: async_sessionmaker, status: IncidentStatus, tier: int
+) -> Incident:
+    now = datetime.now(UTC)
     inc = Incident(
         id=uuid.uuid4(),
         site_id="plant-01",
@@ -107,7 +109,7 @@ async def test_poll_once_fires_due_incident(maker):
 
 @pytest.mark.asyncio
 async def test_poll_once_does_not_process_non_due_incidents(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inc = Incident(
         id=uuid.uuid4(),
         site_id="plant-01",
@@ -128,7 +130,7 @@ async def test_poll_once_does_not_process_non_due_incidents(maker):
         s.add(inc)
         await s.commit()
 
-    processed = await poll_once(maker, worker_id="worker-future", lease_seconds=30, batch=10)
+    await poll_once(maker, worker_id="worker-future", lease_seconds=30, batch=10)
     # We only assert the future incident wasn't touched; processed may include others
     async with maker() as s:
         still_awaiting = await s.get(Incident, inc.id)
@@ -147,7 +149,7 @@ async def test_poll_once_no_duplicate_fire_on_concurrent_calls(maker):
         poll_once(maker, worker_id=w1, lease_seconds=30, batch=10),
         poll_once(maker, worker_id=w2, lease_seconds=30, batch=10),
     )
-    total_processed = sum(results)
+    _ = sum(results)
 
     # Exactly one TIER1_FIRED event for this incident
     async with maker() as s:
@@ -223,7 +225,7 @@ async def test_poll_once_skips_resolved_incident(maker):
         )
         await s.commit()
 
-    processed = await poll_once(maker, worker_id="worker-ack-race", lease_seconds=30, batch=10)
+    await poll_once(maker, worker_id="worker-ack-race", lease_seconds=30, batch=10)
 
     async with maker() as s:
         after = await s.get(Incident, inc.id)

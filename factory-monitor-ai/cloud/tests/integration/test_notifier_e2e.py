@@ -22,19 +22,18 @@ The demo roster + tiers are seeded first (seed_demo_roster / seed_demo_tiers).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from testcontainers.postgres import PostgresContainer
-from alembic import command
-from alembic.config import Config
 
-from cloud.common.db.models import Incident, Message, Outbox
+from cloud.common.db.models import Message, Outbox
 from cloud.common.on_call_resolver import resolve
 from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
@@ -58,7 +57,7 @@ def _make_anomaly(**overrides) -> AnomalyEvent:
         event_id=str(uuid.uuid4()),
         anomaly_type="ppe_no_hardhat",
         rule_id="PPE_NO_HARDHAT",
-        occurred_at=datetime(2026, 6, 23, 10, 0, 0, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 6, 23, 10, 0, 0, tzinfo=UTC),
         site_id="plant-01",
         camera_id="cam_01",
         zone_id="zone_weld_bay",
@@ -99,7 +98,10 @@ async def maker(pg_url: str):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_ingest_then_relay_full_thread(maker: async_sessionmaker):
-    """Incident created via ingest → outbox seeded atomically → relay delivers → SENT + messages row."""
+    """Incident created via ingest → outbox seeded atomically → relay delivers.
+
+    Asserts: SENT status and messages row created.
+    """
     anomaly = _make_anomaly()
 
     # 1. Ingest: create incident with resolver — enqueues tier-0 PENDING outbox atomically.

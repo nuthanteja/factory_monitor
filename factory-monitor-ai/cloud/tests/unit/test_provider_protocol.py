@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import runtime_checkable
 
 import pytest
 
@@ -69,13 +68,13 @@ class _MinimalProvider:
     async def send(
         self,
         to: str,
-        kind: "NotificationKind",
+        kind: NotificationKind,
         *,
         template_name: str | None = None,
         variables: dict | None = None,
         body: str | None = None,
         idempotency_key: str,
-    ) -> "ProviderResult":
+    ) -> ProviderResult:
         return ProviderResult(sid="x", status="sent", channel="console")
 
     async def healthcheck(self) -> bool:

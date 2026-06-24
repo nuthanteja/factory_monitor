@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -101,7 +101,7 @@ async def fire_transition(
         # Another worker already committed this tier; skip all side effects
         return TransitionResult(fired=False, skipped_idempotent=True, new_status=None)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 2. Fetch tier config once (NULL for terminal tier; not needed)
     tier_cfg: EscalationTier | None = None

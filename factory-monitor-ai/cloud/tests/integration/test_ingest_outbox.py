@@ -3,7 +3,7 @@ atomically in the same transaction when an on-call resolver + tier config exist.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from cloud.common.db.models import Incident, IncidentEvent, Outbox
+from cloud.common.db.models import Outbox
 from cloud.common.on_call_resolver import resolve
 from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
@@ -62,7 +62,7 @@ def _make_event(**overrides) -> AnomalyEvent:
         event_id=str(uuid.uuid4()),
         anomaly_type="ppe_no_hardhat",
         rule_id="PPE_NO_HARDHAT",
-        occurred_at=datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=UTC),
         site_id="plant-01",
         camera_id="cam_01",
         zone_id="zone_weld_bay",

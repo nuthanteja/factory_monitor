@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -140,7 +139,9 @@ async def poll_once_ids(
                         "escalation skipped (idempotent) incident_id=%s", incident_id
                     )
         except Exception:
-            logger.exception("error processing incident_id=%s — claim will expire naturally", incident_id)
+            logger.exception(
+                "error processing incident_id=%s — claim will expire naturally", incident_id
+            )
             # Release claim eagerly so it's re-claimable without waiting for lease expiry
             try:
                 async with session_maker() as rel_session:

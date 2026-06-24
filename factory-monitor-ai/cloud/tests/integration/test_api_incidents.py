@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
-
-from alembic import command
-from alembic.config import Config
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
@@ -68,7 +67,7 @@ async def seeded_incident_id(session_maker):
                 dedup_key=f"cam_01|cam_01:1487|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}",
                 status=IncidentStatus.AWAITING_OPERATOR,
                 current_tier=0,
-                next_fire_at=datetime.now(tz=timezone.utc) + timedelta(seconds=120),
+                next_fire_at=datetime.now(tz=UTC) + timedelta(seconds=120),
                 snapshot_url="",
                 is_synthetic=False,
             )

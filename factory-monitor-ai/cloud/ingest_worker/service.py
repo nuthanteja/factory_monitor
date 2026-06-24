@@ -4,10 +4,8 @@ import logging
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +20,8 @@ from cloud.common.db.models import (
 )
 from cloud.common.escalation import fetch_tier_config
 from cloud.common.schemas.anomaly import AnomalyEvent
+
+logger = logging.getLogger(__name__)
 
 _OPEN_STATUSES = (
     IncidentStatus.AWAITING_OPERATOR,
@@ -108,7 +108,7 @@ async def create_incident_from_anomaly(
     if await _open_incident_exists(session, event.dedup_key):
         return IncidentResult(incident_id=None, created=False, reason="duplicate_open_dedup")
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     snapshot_url = event.evidence.snapshot_url or ""
 
     incident = Incident(
@@ -170,7 +170,8 @@ async def create_incident_from_anomaly(
                 )
             else:
                 logger.warning(
-                    "tier-0 operator outbox skipped: incident=%s operator_found=%s tier0_config_found=%s",
+                    "tier-0 operator outbox skipped: incident=%s "
+                    "operator_found=%s tier0_config_found=%s",
                     incident.id,
                     operator is not None,
                     tier_cfg is not None,

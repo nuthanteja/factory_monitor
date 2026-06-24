@@ -7,12 +7,11 @@ unit tests (the integration test in Task 14 will use testcontainers).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cloud.notifications.provider import NotificationKind, ProviderResult
+from cloud.notifications.provider import NotificationKind
 from cloud.notifications.twilio_whatsapp import TwilioWhatsAppProvider
 
 

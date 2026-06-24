@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cloud.notifications.provider import NotificationKind, ProviderResult
+from cloud.notifications.provider import NotificationKind
 from cloud.notifications.twilio_sms import TwilioSmsProvider
 
 

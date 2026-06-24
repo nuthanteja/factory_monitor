@@ -9,11 +9,11 @@ extraction — no behaviour change.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.common.db.models import Incident, IncidentEvent, IncidentStatus
 
@@ -60,7 +60,7 @@ async def acknowledge_incident(
             detail=f"Cannot acknowledge incident in status {inc.status.value}",
         )
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     prev_status = inc.status.value
     inc.status = IncidentStatus.ACK
     inc.next_fire_at = None
@@ -110,7 +110,7 @@ async def resolve_incident(
             detail=f"Cannot resolve incident in status {inc.status.value}",
         )
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     prev_status = inc.status.value
     inc.status = IncidentStatus.RESOLVED
     inc.next_fire_at = None

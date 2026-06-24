@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Body, Depends, Header, status
 from pydantic import BaseModel
@@ -12,6 +12,8 @@ from cloud.api.deps import get_session_maker
 from cloud.common.db.models import Incident
 from cloud.common.incident_actions import (
     acknowledge_incident as _ack_incident,
+)
+from cloud.common.incident_actions import (
     resolve_incident as _resolve_incident,
 )
 from cloud.common.schemas.incident import IncidentListResponse, IncidentOut
@@ -42,7 +44,7 @@ async def list_incidents(
             await session.execute(select(Incident).order_by(Incident.created_at.desc()))
         ).scalars().all()
     incidents = [IncidentOut.model_validate(row) for row in rows]
-    server_now = datetime.now(tz=timezone.utc).isoformat()
+    server_now = datetime.now(tz=UTC).isoformat()
     return IncidentListResponse(incidents=incidents, meta={"server_now": server_now})
 
 

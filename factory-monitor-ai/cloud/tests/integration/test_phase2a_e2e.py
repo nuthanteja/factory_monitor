@@ -36,7 +36,7 @@ Signature adaptations vs the Task-18 brief:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,6 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from testcontainers.postgres import PostgresContainer
 
 from cloud.common.db.models import (
@@ -58,9 +57,9 @@ from cloud.common.db.models import (
     Outbox,
     User,
 )
+from cloud.common.incident_actions import acknowledge_incident as _shared_acknowledge_incident
 from cloud.common.on_call_resolver import resolve as _resolve_on_call
 from cloud.common.schemas.anomaly import AnomalyEvent, AnomalyType, Evidence, Severity
-from cloud.common.incident_actions import acknowledge_incident as _shared_acknowledge_incident
 from cloud.escalation_worker.worker import EscalationWorker
 from cloud.ingest_worker.service import create_incident_from_anomaly
 from cloud.notifications.console import ConsoleProvider
@@ -85,7 +84,7 @@ def _make_anomaly_event(*, site_id: str = "plant-01", camera_id: str = "cam_01")
         event_id=str(uuid.uuid4()),
         anomaly_type=AnomalyType.PPE_NO_HARDHAT,
         rule_id="PPE_NO_HARDHAT",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         site_id=site_id,
         camera_id=camera_id,
         zone_id="zone_weld_bay",
@@ -129,8 +128,8 @@ async def _seed_roster_and_tiers(
 
         await session.flush()
 
-        far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
-        past = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        far_future = datetime(2099, 1, 1, tzinfo=UTC)
+        past = datetime(2020, 1, 1, tzinfo=UTC)
         for role, user in users.items():
             session.add(OnCallAssignment(
                 id=uuid.uuid4(),
@@ -195,14 +194,20 @@ async def _make_incident_due(
         await session.execute(
             update(Incident)
             .where(Incident.id == incident_id)
-            .values(next_fire_at=text("now() - interval '1 second'"), claimed_until=None, claimed_by=None)
+            .values(
+                next_fire_at=text("now() - interval '1 second'"),
+                claimed_until=None,
+                claimed_by=None,
+            )
         )
         await session.commit()
 
 
 async def _get_incident(session_maker: async_sessionmaker, incident_id: uuid.UUID) -> Incident:
     async with session_maker() as session:
-        row = (await session.execute(select(Incident).where(Incident.id == incident_id))).scalar_one()
+        row = (
+            await session.execute(select(Incident).where(Incident.id == incident_id))
+        ).scalar_one()
         # detach so attributes are accessible outside the session
         await session.refresh(row)
         return row
@@ -568,7 +573,7 @@ async def test_idempotency_guard_blocks_duplicate_tier_fire(pg_session_maker):
             EscalationIdempotency(
                 incident_id=incident_id,
                 tier=1,
-                fired_at=datetime.now(timezone.utc),
+                fired_at=datetime.now(UTC),
             )
         )
         await session.commit()
@@ -593,4 +598,6 @@ async def test_idempotency_guard_blocks_duplicate_tier_fire(pg_session_maker):
     # Confirm no duplicate audit event
     audit = await _audit_events(session_maker, incident_id)
     tier1_events = [e for e in audit if e.type == "TIER1_FIRED"]
-    assert len(tier1_events) == 0, "no TIER1_FIRED audit event must be written when idempotency skips"
+    assert len(tier1_events) == 0, (
+        "no TIER1_FIRED audit event must be written when idempotency skips"
+    )

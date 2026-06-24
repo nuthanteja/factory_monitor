@@ -6,7 +6,7 @@ next_fire_at into the past so no wall-clock sleeping is needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -69,7 +69,7 @@ async def _insert_incident(
     current_tier: int = 0,
     next_fire_at_offset_seconds: int = -10,  # negative = in the past (due now)
 ) -> Incident:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inc = Incident(
         id=uuid.uuid4(),
         site_id="plant-01",

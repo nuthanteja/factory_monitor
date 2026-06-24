@@ -1,8 +1,9 @@
 import inspect
 
-from cloud.tools.consume_print import consume_one
-from cloud.tools.publish_fixture import load_fixture_event, main as publish_main
 from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.tools.consume_print import consume_one
+from cloud.tools.publish_fixture import load_fixture_event
+from cloud.tools.publish_fixture import main as publish_main
 
 
 def test_fixture_loader_returns_valid_event() -> None:

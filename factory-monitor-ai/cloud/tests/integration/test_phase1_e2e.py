@@ -9,29 +9,27 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-from cloud.common.kafka import make_producer, publish_event
-from cloud.common.schemas.anomaly import AnomalyEvent
-from cloud.ingest_worker.consumer import handle_message
-from cloud.common.db.models import Incident, IncidentEvent
-from edge.vision.debounce import DebounceConfig, TrackDebouncer
-from edge.vision.detector import Detection
-from edge.vision.engine import StubFrameSource, VisionEngine
-from edge.vision.zone_config import CameraConfig, ZoneConfig
-
+from aiokafka import AIOKafkaConsumer
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.kafka import KafkaContainer
 from testcontainers.postgres import PostgresContainer
-from aiokafka import AIOKafkaConsumer
 
-from alembic import command
-from alembic.config import Config
+from cloud.common.db.models import Incident, IncidentEvent
+from cloud.common.kafka import make_producer, publish_event
+from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.ingest_worker.consumer import handle_message
+from edge.vision.debounce import DebounceConfig, TrackDebouncer
+from edge.vision.detector import Detection
+from edge.vision.engine import StubFrameSource, VisionEngine
+from edge.vision.zone_config import CameraConfig, ZoneConfig
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
 TOPIC = "vision.anomalies.v1"
@@ -73,7 +71,10 @@ def _async_url(sync_url: str) -> str:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ppe_violation_becomes_incident_end_to_end():
-    with PostgresContainer("postgres:16") as pg, KafkaContainer("confluentinc/cp-kafka:7.6.0") as kafka:
+    with (
+        PostgresContainer("postgres:16") as pg,
+        KafkaContainer("confluentinc/cp-kafka:7.6.0") as kafka,
+    ):
         sync_url = pg.get_connection_url()
         cfg = Config()
         cfg.set_main_option("script_location", MIGRATIONS)
@@ -101,7 +102,7 @@ async def test_ppe_violation_becomes_incident_end_to_end():
                 debouncer=TrackDebouncer(DebounceConfig(window=12, m_of_n=8, clear_consecutive=6)),
                 publish=publish,
                 frame_source=StubFrameSource([np.zeros((720, 1280, 3), dtype=np.uint8)] * 12),
-                clock=lambda: datetime.now(timezone.utc),
+                clock=lambda: datetime.now(UTC),
             )
             produced = await vision.run()
             assert produced == 1
@@ -144,7 +145,11 @@ async def test_ppe_violation_becomes_incident_end_to_end():
 
         # 4) AUDIT: the incident has exactly one CREATED event.
         async with session_maker() as s:
-            evts = (await s.execute(select(IncidentEvent).where(IncidentEvent.incident_id == inc.id))).scalars().all()
+            evts = (
+                await s.execute(
+                    select(IncidentEvent).where(IncidentEvent.incident_id == inc.id)
+                )
+            ).scalars().all()
         assert len(evts) == 1
         assert evts[0].type == "CREATED"
 

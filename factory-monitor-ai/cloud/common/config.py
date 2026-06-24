@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     twilio_sms_from: str | None = None       # E.164
 
     # Twilio
-    twilio_skip_signature_check: bool = False  # TWILIO_SKIP_SIGNATURE_CHECK — deliberate dev/test opt-in only
+    # TWILIO_SKIP_SIGNATURE_CHECK — deliberate dev/test opt-in only
+    twilio_skip_signature_check: bool = False
 
 
 @lru_cache(maxsize=1)

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import inspect
 import uuid
-from datetime import datetime, timezone
-from typing import Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from typing import Protocol
 
 import numpy as np
 
@@ -14,7 +15,7 @@ from edge.vision.debounce import (
     point_in_polygon,
 )
 from edge.vision.detector import Detection
-from edge.vision.frame_source import FrameSource, StubFrameSource
+from edge.vision.frame_source import FrameSource, StubFrameSource  # noqa: F401
 from edge.vision.zone_config import CameraConfig
 
 RULE_ID = "PPE_NO_HARDHAT"
@@ -92,7 +93,7 @@ class VisionEngine:
         self.debouncer = debouncer
         self.publish = publish
         self.frame_source = frame_source
-        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.clock = clock or (lambda: datetime.now(UTC))
         self.zones = [z for z in cfg.zones if z.kind == "required_ppe"]
 
     async def _emit(self, key: str, ev: AnomalyEvent) -> None:

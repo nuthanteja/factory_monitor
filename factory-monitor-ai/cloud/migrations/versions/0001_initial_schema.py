@@ -75,8 +75,12 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(timezone=True)),
         sa.Column("resolution_note", sa.Text()),
         sa.Column("is_synthetic", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index(
         "uq_incident_open_dedup", "incidents", ["dedup_key"], unique=True,
@@ -99,7 +103,9 @@ def upgrade() -> None:
         sa.Column("actor_user_id", postgresql.UUID(as_uuid=True)),
         sa.Column("source_event_id", postgresql.UUID(as_uuid=True)),
         sa.Column("payload", postgresql.JSONB()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index(
         "uq_event_source", "incident_events", ["source_event_id"], unique=True,
@@ -112,7 +118,9 @@ def upgrade() -> None:
         sa.Column("incident_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("incidents.id"), primary_key=True),
         sa.Column("tier", sa.Integer(), primary_key=True),
-        sa.Column("fired_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "fired_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -131,9 +139,14 @@ def upgrade() -> None:
         sa.Column("status", outbox_status, nullable=False, server_default="PENDING"),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("max_attempts", sa.Integer(), nullable=False, server_default="6"),
-        sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "next_attempt_at",
+            sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(),
+        ),
         sa.Column("provider_sid", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("sent_at", sa.DateTime(timezone=True)),
     )
     op.create_index(
@@ -154,14 +167,19 @@ def upgrade() -> None:
         sa.Column("body", sa.Text()),
         sa.Column("provider_sid", sa.Text()),
         sa.Column("status", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
         "whatsapp_sessions",
         sa.Column("phone_e164", sa.Text(), primary_key=True),
         sa.Column("window_expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("last_inbound_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "last_inbound_at",
+            sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(),
+        ),
     )
 
     op.create_table(
@@ -171,7 +189,9 @@ def upgrade() -> None:
         sa.Column("from_phone_e164", sa.Text(), nullable=False),
         sa.Column("body", sa.Text()),
         sa.Column("provider_sid", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -185,7 +205,9 @@ def upgrade() -> None:
         sa.Column("password_hash", sa.Text()),
         sa.Column("role", sa.Text(), nullable=False, server_default="VIEWER"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -195,7 +217,9 @@ def upgrade() -> None:
         sa.Column("site_id", sa.Text(), nullable=False),
         sa.Column("role", escalation_role, nullable=False),
         sa.Column("zone_id", sa.Text()),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
         sa.Column("starts_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ends_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -224,7 +248,9 @@ def upgrade() -> None:
         sa.Column("kind", sa.Text(), nullable=False),
         sa.Column("polygon", postgresql.JSONB(), nullable=False),
         sa.Column("required_ppe", postgresql.ARRAY(sa.String()), server_default=sa.text("'{}'")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(
@@ -236,7 +262,9 @@ def upgrade() -> None:
         sa.Column("rtsp_path", sa.Text(), nullable=False),
         sa.Column("whep_url", sa.Text()),
         sa.Column("zone_id", sa.Text(), sa.ForeignKey("zones.id")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
 
     op.create_table(

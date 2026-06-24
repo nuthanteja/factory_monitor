@@ -12,22 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from alembic import command
-from alembic.config import Config
-
-from cloud.common.db.models import Incident, IncidentStatus, Message, Outbox
-from cloud.notifications.console import ConsoleProvider
+from cloud.common.db.models import Message, Outbox
 from cloud.notifications.chain import ProviderChain
-from cloud.notifications.provider import NotificationKind, ProviderResult
+from cloud.notifications.console import ConsoleProvider
+from cloud.notifications.provider import ProviderResult
 from cloud.notifier_worker.relay import _process_row, run_once
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -61,7 +60,7 @@ async def maker(pg: str):
 async def _seed_incident(session: AsyncSession) -> uuid.UUID:
     """Insert a minimal incident and return its id."""
     inc_id = uuid.uuid4()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     await session.execute(
         text(
             """
@@ -88,7 +87,7 @@ async def _seed_outbox(
     attempts: int = 0,
 ) -> uuid.UUID:
     ob_id = uuid.uuid4()
-    na = next_attempt_at or datetime.now(tz=timezone.utc)
+    na = next_attempt_at or datetime.now(tz=UTC)
     await session.execute(
         text(
             """
@@ -168,10 +167,10 @@ async def test_failing_provider_increments_attempts_and_stays_pending(
     assert ob.status == "PENDING"
     assert ob.attempts == 1
     # next_attempt_at must be in the future (backoff applied)
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     naa = ob.next_attempt_at
     if naa.tzinfo is None:
-        naa = naa.replace(tzinfo=timezone.utc)
+        naa = naa.replace(tzinfo=UTC)
     assert naa > now
 
 
@@ -226,7 +225,7 @@ async def test_two_pending_rows_both_delivered(maker: async_sessionmaker):
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_future_next_attempt_at_is_skipped(maker: async_sessionmaker):
-    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
     async with maker() as s:
         inc_id = await _seed_incident(s)
         ob_id = await _seed_outbox(s, inc_id, next_attempt_at=future)

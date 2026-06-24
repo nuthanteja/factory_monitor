@@ -5,7 +5,7 @@ Zone-specific assignment wins over plant-wide (zone_id IS NULL) fallback.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +26,7 @@ async def resolve(
     (zone_id IS NULL). Returns None when no assignment covers the window.
     """
     if at is None:
-        at = datetime.now(timezone.utc)
+        at = datetime.now(UTC)
 
     # Build a subquery that finds assignments active at `at` for this role+site,
     # preferring zone-specific rows (zone_id = :zone_id) over plant-wide (IS NULL).

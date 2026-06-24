@@ -69,7 +69,9 @@ def build_provider_chain(settings: Any) -> list[Any]:
     names = [n.strip().lower() for n in settings.notify_provider_chain.split(",") if n.strip()]
 
     if not names:
-        raise ValueError("notify_provider_chain is empty — specify at least one provider (e.g. 'console')")
+        raise ValueError(
+            "notify_provider_chain is empty — specify at least one provider (e.g. 'console')"
+        )
 
     providers: list[Any] = []
 

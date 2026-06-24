@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -95,7 +95,7 @@ async def _process_row(
         idempotency_key=str(row.id),
     )
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     async with session_maker() as session:
         # Re-fetch WITH a row lock so a concurrent replica that also fetched this row
@@ -172,7 +172,7 @@ class NotifierRelay:
     def __init__(
         self,
         session_maker: async_sessionmaker,
-        provider_chain: "ProviderChain | list",
+        provider_chain: ProviderChain | list,
         *,
         batch: int = _BATCH,
         backoff_base: int = _BACKOFF_BASE_SECONDS,

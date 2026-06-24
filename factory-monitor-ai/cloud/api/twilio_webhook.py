@@ -23,7 +23,7 @@ import hashlib
 import hmac
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -50,7 +50,9 @@ _TWIML_EMPTY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 _WINDOW_HOURS = 24
 
 
-def _validate_twilio_signature(auth_token: str, url: str, params: dict[str, str], signature: str) -> bool:
+def _validate_twilio_signature(
+    auth_token: str, url: str, params: dict[str, str], signature: str
+) -> bool:
     """Verify Twilio's HMAC-SHA1 request signature."""
     sorted_params = "".join(f"{k}{v}" for k, v in sorted(params.items()))
     s = url + sorted_params
@@ -100,7 +102,7 @@ async def twilio_inbound(
     provider_sid = params.get("MessageSid")
     keyword = body_text.upper()
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     window_expires = now + timedelta(hours=_WINDOW_HOURS)
 
     async with session_maker() as session:
@@ -187,7 +189,9 @@ async def twilio_inbound(
                         payload={"source": "whatsapp_reply", "body": body_text},
                     ))
 
-                elif keyword in _RESOLVE_KEYWORDS and inc.status in (_ACTIVE | {IncidentStatus.ACK}):
+                elif keyword in _RESOLVE_KEYWORDS and inc.status in (
+                    _ACTIVE | {IncidentStatus.ACK}
+                ):
                     prev = inc.status.value
                     inc.status = IncidentStatus.RESOLVED
                     inc.next_fire_at = None

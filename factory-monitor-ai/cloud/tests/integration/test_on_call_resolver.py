@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -88,7 +88,7 @@ async def _seed_assignment(
 
 @pytest.mark.asyncio
 async def test_resolve_returns_user_in_window(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = await _seed_user(maker, "+10000000001")
     await _seed_assignment(
         maker, user.id, "OPERATOR",
@@ -103,15 +103,17 @@ async def test_resolve_returns_user_in_window(maker):
 
 @pytest.mark.asyncio
 async def test_resolve_returns_none_when_no_assignment(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with maker() as s:
-        result = await resolve(s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id="zone_x", at=now)
+        result = await resolve(
+            s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id="zone_x", at=now
+        )
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_resolve_zone_specific_before_plant_wide(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plant_wide_user = await _seed_user(maker, "+10000000002")
     zone_user = await _seed_user(maker, "+10000000003")
     await _seed_assignment(
@@ -127,14 +129,16 @@ async def test_resolve_zone_specific_before_plant_wide(maker):
         zone_id="zone_weld_bay",  # zone-specific wins
     )
     async with maker() as s:
-        result = await resolve(s, role="FLOOR_MANAGER", site_id="plant-01", zone_id="zone_weld_bay", at=now)
+        result = await resolve(
+            s, role="FLOOR_MANAGER", site_id="plant-01", zone_id="zone_weld_bay", at=now
+        )
     assert result is not None
     assert result.phone_e164 == "+10000000003"
 
 
 @pytest.mark.asyncio
 async def test_resolve_falls_back_to_plant_wide_when_no_zone_match(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plant_wide_user = await _seed_user(maker, "+10000000004")
     await _seed_assignment(
         maker, plant_wide_user.id, "FLOOR_MANAGER",
@@ -143,14 +147,16 @@ async def test_resolve_falls_back_to_plant_wide_when_no_zone_match(maker):
         zone_id=None,
     )
     async with maker() as s:
-        result = await resolve(s, role="FLOOR_MANAGER", site_id="plant-01", zone_id="zone_nonexistent", at=now)
+        result = await resolve(
+            s, role="FLOOR_MANAGER", site_id="plant-01", zone_id="zone_nonexistent", at=now
+        )
     assert result is not None
     assert result.phone_e164 == "+10000000004"
 
 
 @pytest.mark.asyncio
 async def test_resolve_expired_assignment_not_returned(maker):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = await _seed_user(maker, "+10000000005")
     await _seed_assignment(
         maker, user.id, "PLANT_DIRECTOR",
@@ -165,7 +171,7 @@ async def test_resolve_expired_assignment_not_returned(maker):
 @pytest.mark.asyncio
 async def test_resolve_at_starts_at_boundary_is_inclusive(maker):
     """Verify [starts_at, ends_at) half-open window: starts_at is inclusive."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = await _seed_user(maker, "+10000000006")
     starts_at = now
     ends_at = now + timedelta(hours=2)
@@ -184,7 +190,7 @@ async def test_resolve_at_starts_at_boundary_is_inclusive(maker):
 @pytest.mark.asyncio
 async def test_resolve_at_ends_at_boundary_is_exclusive(maker):
     """Verify [starts_at, ends_at) half-open window: ends_at is exclusive."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = await _seed_user(maker, "+10000000007")
     starts_at = now - timedelta(hours=1)
     ends_at = now
@@ -195,5 +201,7 @@ async def test_resolve_at_ends_at_boundary_is_exclusive(maker):
         zone_id=None,  # plant-wide to avoid fallback conflicts
     )
     async with maker() as s:
-        result = await resolve(s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id=None, at=ends_at)
+        result = await resolve(
+            s, role="PLANT_DIRECTOR", site_id="plant-01", zone_id=None, at=ends_at
+        )
     assert result is None

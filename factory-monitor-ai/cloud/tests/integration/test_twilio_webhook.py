@@ -1,30 +1,33 @@
 # E:/Builds/factory_monitor/factory-monitor-ai/cloud/tests/integration/test_twilio_webhook.py
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
-import base64
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlencode
 
 import pytest
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from alembic import command
-from alembic.config import Config
-
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
 from cloud.common.db.models import (
-    Incident, IncidentEvent, IncidentStatus,
-    Message, UnmatchedInbound, WhatsappSession,
+    Incident,
+    IncidentEvent,
+    IncidentStatus,
+    Message,
+    UnmatchedInbound,
+    WhatsappSession,
 )
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -95,7 +98,7 @@ def _make_incident(status: IncidentStatus = IncidentStatus.AWAITING_OPERATOR) ->
         dedup_key=f"cam_01|cam_01:5001|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}",
         status=status,
         current_tier=1,
-        next_fire_at=datetime.now(tz=timezone.utc) + timedelta(seconds=300),
+        next_fire_at=datetime.now(tz=UTC) + timedelta(seconds=300),
         snapshot_url="",
         is_synthetic=False,
     )
@@ -160,7 +163,7 @@ async def test_matched_inbound_opens_whatsapp_session_and_writes_message(client,
                 select(WhatsappSession).where(WhatsappSession.phone_e164 == from_phone)
             )
         ).scalar_one()
-        assert session_row.window_expires_at > datetime.now(tz=timezone.utc)
+        assert session_row.window_expires_at > datetime.now(tz=UTC)
 
         # Message recorded direction='in'
         msg = (

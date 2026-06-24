@@ -50,8 +50,8 @@ describe("App live command center", () => {
   it("shows LIVE and renders live incident cards once the socket delivers a snapshot", async () => {
     renderApp();
     const ws = MockWebSocket.last();
-    act(() => ws.open());
-    act(() =>
+    await act(async () => ws.open());
+    await act(async () =>
       ws.emit({
         type: "snapshot",
         version: 1,
@@ -70,11 +70,11 @@ describe("App live command center", () => {
     expect(screen.getByTestId("connection-pill")).toHaveTextContent(/RECONNECTING/i);
   });
 
-  it("flips to RECONNECTING immediately when the socket closes", () => {
+  it("flips to RECONNECTING immediately when the socket closes", async () => {
     renderApp();
     const ws = MockWebSocket.last();
-    act(() => ws.open());
-    act(() =>
+    await act(async () => ws.open());
+    await act(async () =>
       ws.emit({
         type: "snapshot",
         version: 1,
@@ -85,7 +85,7 @@ describe("App live command center", () => {
     );
     expect(screen.getByTestId("connection-pill")).toHaveTextContent(/LIVE/i);
     // Simulate the server closing the socket — scheduleReconnect sets connected=false
-    act(() => ws.serverClose());
+    await act(async () => ws.serverClose());
     expect(screen.getByTestId("connection-pill")).toHaveTextContent(
       /RECONNECTING/i,
     );

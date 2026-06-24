@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
-import { CountdownTimer, formatRemaining } from "../../src/components/CountdownTimer";
+import { CountdownTimer } from "../../src/components/CountdownTimer";
+import { formatRemaining } from "../../src/lib/formatRemaining";
 import { ServerClock } from "../../src/lib/serverClock";
 
 describe("formatRemaining", () => {

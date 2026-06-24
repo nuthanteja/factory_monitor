@@ -124,7 +124,7 @@ describe("applyEnvelope", () => {
   });
 
   it("drops a duplicate/stale seq (idempotent re-delivery)", () => {
-    let s = applyEnvelope(
+    const s = applyEnvelope(
       initialLiveState,
       env("snapshot", 5, { incidents: [view(A)] }),
     ).state;
@@ -135,7 +135,7 @@ describe("applyEnvelope", () => {
   });
 
   it("flags a FORWARD seq gap but still applies and advances lastSeq", () => {
-    let s = applyEnvelope(
+    const s = applyEnvelope(
       initialLiveState,
       env("snapshot", 1, { incidents: [view(A)] }),
     ).state;
@@ -147,7 +147,7 @@ describe("applyEnvelope", () => {
   });
 
   it("advances on system.heartbeat without touching the map", () => {
-    let s = applyEnvelope(
+    const s = applyEnvelope(
       initialLiveState,
       env("snapshot", 1, { incidents: [view(A)] }),
     ).state;
@@ -173,7 +173,7 @@ describe("applyEnvelope", () => {
 
 describe("selectSortedIncidents", () => {
   it("puts non-terminal before terminal, newest opened_at first", () => {
-    let s = applyEnvelope(
+    const s = applyEnvelope(
       initialLiveState,
       env("snapshot", 1, {
         incidents: [

@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -79,6 +80,37 @@ class DownRedis:
         raise ConnectionError("redis down")
 
 
+class FlappingRedis:
+    """Ping raises for the first `down_for` calls, then succeeds.
+
+    Also stubs out pubsub() so that when the supervisor switches to the
+    subscriber path, it gets a non-blocking pubsub that immediately returns
+    no messages (the test uses a spy on RedisFanoutSubscriber.run instead).
+    """
+
+    def __init__(self, down_for: int) -> None:
+        self._call_count = 0
+        self._down_for = down_for
+
+    async def ping(self) -> bool:
+        self._call_count += 1
+        if self._call_count <= self._down_for:
+            raise ConnectionError("redis down (flapping)")
+        return True
+
+    def pubsub(self) -> object:  # pragma: no cover — only reached in subscriber path
+        class _FakePubSub:
+            async def subscribe(self, *_a: object) -> None: ...
+            async def get_message(self, **_kw: object) -> None:
+                # yield control so the event loop can check stop_event
+                await asyncio.sleep(0)
+                return None
+            async def unsubscribe(self, *_a: object) -> None: ...
+            async def aclose(self) -> None: ...
+
+        return _FakePubSub()
+
+
 async def _insert(maker) -> Incident:
     now = datetime.now(UTC)
     inc = Incident(
@@ -141,7 +173,60 @@ async def test_supervisor_graceful_stop(maker):
     task = asyncio.create_task(sup.run(stop_event=stop))
     await asyncio.sleep(0.15)
     stop.set()
-    # Must complete cleanly within timeout — no leaked tasks.
+    # Must complete cleanly within timeout — no leaked tasks (Fix 3: explicit done check).
     await asyncio.wait_for(task, timeout=5)
-    assert task.done()
-    assert not task.cancelled()
+    assert task.done(), "supervisor task must be done after stop_event"
+    assert not task.cancelled(), "supervisor task must exit cleanly, not be cancelled"
+    # No pending tasks leaked by the supervisor's inner fallback loop.
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    assert not pending, f"leaked tasks after graceful stop: {pending}"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_recovery_redis_down_then_up(maker):
+    """Recovery path: Redis down -> fallback runs; Redis recovers -> subscriber entered.
+
+    FlappingRedis.ping() raises for the first 3 calls (covering the initial
+    health check and a supervision window), then succeeds.  We spy on
+    RedisFanoutSubscriber.run to detect that the subscriber is entered after
+    recovery without actually running a real Redis pubsub loop.
+    The supervisor is stopped via stop_event as soon as the spy is triggered
+    so the test is fast and deterministic.
+    """
+    # Small supervision window so the loop re-checks Redis quickly.
+    settings = Settings(ws_fallback_poll_seconds=0.05, ws_fallback_batch=200)
+    mgr = FakeManager()
+    redis = FlappingRedis(down_for=3)
+
+    subscriber_entered = asyncio.Event()
+
+    async def _fake_subscriber_run(self, *, stop_event=None):  # noqa: ANN001
+        """Spy: record that the subscriber path was reached, then stop."""
+        subscriber_entered.set()
+        # Immediately yield so the supervisor can react to stop_event.
+        if stop_event is not None:
+            stop_event.set()
+
+    stop = asyncio.Event()
+
+    with patch(
+        "cloud.common.ws.fanout.RedisFanoutSubscriber.run",
+        new=_fake_subscriber_run,
+    ):
+        sup = FanoutSupervisor(redis, maker, mgr, settings)
+        task = asyncio.create_task(sup.run(stop_event=stop))
+
+        # Wait for subscriber path to be entered (recovery) or a generous timeout.
+        try:
+            await asyncio.wait_for(subscriber_entered.wait(), timeout=5)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=5)
+
+    # While Redis was down the fallback must have broadcast at least the
+    # health-check failure (mgr.sent may be empty if no DB rows exist, so we
+    # only assert the subscriber was entered — that proves recovery happened).
+    assert subscriber_entered.is_set(), (
+        "RedisFanoutSubscriber.run was never called — supervisor did not recover"
+    )
+    assert task.done(), "supervisor task must be done after stop"

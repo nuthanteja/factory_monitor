@@ -106,19 +106,28 @@ async def start_ws_fanout(app: object) -> None:
 
     settings = getattr(app.state, "settings", None) or get_settings()  # type: ignore[attr-defined]
     supervisor = FanoutSupervisor(redis_client, session_maker, manager, settings)
-    task = asyncio.create_task(supervisor.run())
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(supervisor.run(stop_event=stop_event))
     app.state.ws_fanout = task  # type: ignore[attr-defined]
+    app.state.ws_fanout_stop = stop_event  # type: ignore[attr-defined]
     logger.info("ws fanout supervisor background task started")
 
 
 async def stop_ws_fanout(app: object) -> None:
-    """Cancel and await the fan-out supervisor task stored at app.state.ws_fanout."""
+    """Signal stop_event then cancel and await the fan-out supervisor task.
+
+    Sets ws_fanout_stop first so the supervisor's inner loops drain cleanly,
+    then cancels the task and awaits it WITHOUT asyncio.shield so a slow
+    teardown never leaks the task past the timeout.
+    """
     task: asyncio.Task | None = getattr(app.state, "ws_fanout", None)  # type: ignore[attr-defined]
     if task is None or task.done():
         return
+    if (ev := getattr(app.state, "ws_fanout_stop", None)) is not None:
+        ev.set()
     task.cancel()
     try:
-        await asyncio.wait_for(asyncio.shield(task), timeout=5)
+        await asyncio.wait_for(task, timeout=5)  # no shield — task must terminate
     except (TimeoutError, asyncio.CancelledError):
         pass
     logger.info("ws fanout supervisor stopped")

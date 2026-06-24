@@ -8,15 +8,16 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from testcontainers.kafka import KafkaContainer
 from testcontainers.postgres import PostgresContainer
 
-from alembic import command
-from alembic.config import Config
-
-from cloud.common.db.models import Incident
+from cloud.common.db.models import Incident, Outbox
+from cloud.common.on_call_resolver import resolve as on_call_resolve
+from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
 from cloud.ingest_worker.consumer import handle_message
 
 DLQ_TOPIC = "vision.anomalies.dlq"
@@ -57,6 +58,17 @@ def migrated_url(pg_container: PostgresContainer) -> str:
 async def session_maker(migrated_url: str):
     engine = create_async_engine(migrated_url, future=True)
     maker = async_sessionmaker(engine, expire_on_commit=False)
+    yield maker
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def seeded_session_maker(migrated_url: str):
+    """session_maker with demo roster + tier config seeded for resolver tests."""
+    engine = create_async_engine(migrated_url, future=True)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    await seed_demo_roster(maker)
+    await seed_demo_tiers(maker, site_id="plant-01", delay_seconds=5)
     yield maker
     await engine.dispose()
 
@@ -143,3 +155,55 @@ async def test_malformed_message_goes_to_dlq_and_creates_no_incident(
         assert msg.value == bad
     finally:
         await consumer.stop()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_with_resolver_enqueues_tier0_outbox(
+    seeded_session_maker, producer
+):
+    """Consumer path: handle_message with on_call_resolver enqueues tier-0 outbox row atomically."""
+    eid = str(uuid.uuid4())
+    value = _valid_value(
+        event_id=eid,
+        dedup_key=f"cons_res|cam_01|PPE_NO_HARDHAT|{eid[:8]}",
+        site_id="plant-01",
+    )
+
+    status = await handle_message(
+        seeded_session_maker,
+        producer,
+        value,
+        b"cam_01",
+        dlq_topic=DLQ_TOPIC,
+        grace_seconds=120,
+        on_call_resolver=on_call_resolve,
+    )
+
+    assert status == "created"
+
+    # Verify the tier-0 outbox row was enqueued in the same transaction
+    async with seeded_session_maker() as s:
+        # Find the incident by dedup_key
+        incident = (
+            await s.execute(
+                select(Incident).where(
+                    Incident.dedup_key == f"cons_res|cam_01|PPE_NO_HARDHAT|{eid[:8]}"
+                )
+            )
+        ).scalar_one()
+
+        outbox_rows = (
+            await s.execute(
+                select(Outbox).where(Outbox.incident_id == incident.id)
+            )
+        ).scalars().all()
+
+    assert len(outbox_rows) == 1, (
+        f"Expected 1 tier-0 outbox row, got {len(outbox_rows)}"
+    )
+    row = outbox_rows[0]
+    assert row.tier == 0
+    assert row.status == "PENDING"
+    assert row.to_phone_e164 == "+15550000001"  # Demo Operator phone from seed
+    assert row.template_name == "operator_alert_v1"
+    assert row.idempotency_key == f"{incident.id}|0"

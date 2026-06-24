@@ -1,5 +1,5 @@
-from cloud.common.db.base import Base
 from cloud.common.db import models  # noqa: F401  (registers tables on Base)
+from cloud.common.db.base import Base
 from cloud.common.db.models import IncidentStatus
 
 EXPECTED_TABLES = {
@@ -57,5 +57,9 @@ def test_incident_events_fk_to_incidents() -> None:
 
 def test_partial_index_where_clauses() -> None:
     idxs = {i.name: i for i in Base.metadata.tables["incidents"].indexes}
-    assert "status IN" in str(idxs["uq_incident_open_dedup"].dialect_kwargs.get("postgresql_where", ""))
-    assert "status IN" in str(idxs["idx_incident_due"].dialect_kwargs.get("postgresql_where", ""))
+    assert "status IN" in str(
+        idxs["uq_incident_open_dedup"].dialect_kwargs.get("postgresql_where", "")
+    )
+    assert "status IN" in str(
+        idxs["idx_incident_due"].dialect_kwargs.get("postgresql_where", "")
+    )

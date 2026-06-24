@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: factory-monitor-ai
+
+jobs:
+  cloud-tests:
+    name: Cloud tests (Postgres + Kafka via testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: factory-monitor-ai/pyproject.toml
+      # numpy/shapely are needed because the phase-1 e2e test bridges the edge
+      # vision engine into the cloud pipeline (edge -> Kafka -> ingest -> API).
+      - name: Install (api + workers + notifications + dev/test + edge bridge)
+        run: pip install -e ".[dev,notifications]" "numpy==1.26.4" "shapely==2.0.4"
+      - name: Run cloud test suite
+        # Docker is preinstalled on ubuntu-latest; testcontainers spins up
+        # postgres:16 and confluentinc/cp-kafka:7.6.0 for the integration tests.
+        run: pytest cloud/tests/ -q
+
+  edge-tests:
+    name: Edge tests (vision engine + Kafka)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: factory-monitor-ai/pyproject.toml
+      # The heavy ML stack (torch/ultralytics/opencv) is lazy-imported and the
+      # detector is injected via a Protocol, so the edge tests only need numpy
+      # (frames) and shapely (zone geometry) on top of the dev/test extras.
+      - name: Install (light edge deps — no torch/ultralytics)
+        run: pip install -e ".[dev]" "numpy==1.26.4" "shapely==2.0.4"
+      - name: Run edge test suite
+        run: pytest edge/tests/ -q
+
+  frontend-tests:
+    name: Frontend tests + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: factory-monitor-ai/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: factory-monitor-ai/frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck + build (tsc + vite)
+        run: npm run build
+      - name: Run tests (vitest)
+        run: npm test
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned to match the version the codebase was cleaned against, so CI and
+      # local agree and a ruff release can't surprise the build with new rules.
+      - name: Install ruff
+        run: pip install ruff==0.15.18
+      - name: Ruff check
+        run: ruff check .

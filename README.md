@@ -1,14 +1,20 @@
 # Factory Monitor AI
 
+[![CI](https://github.com/nuthanteja/factory_monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/nuthanteja/factory_monitor/actions/workflows/ci.yml)
+
 An edge + cloud, event-driven monitoring system for a manufacturing floor: a local
 computer-vision engine watches camera feeds for safety/operational anomalies (e.g. a
 worker in a required-PPE zone without a hard hat), streams them through Kafka, turns
-them into durable incidents, and surfaces them on a real-time command-center dashboard.
+them into durable incidents, escalates the ones nobody acknowledges (paging the on-call
+chain over WhatsApp/SMS), and surfaces them on a real-time command-center dashboard.
 
-> **Status:** Phase 0 + Phase 1 complete — the full vertical slice works end-to-end
-> (edge vision → Kafka → ingest → PostgreSQL → API → dashboard), with 85 passing tests
-> (cloud + edge integration tests on real containers, plus the frontend suite).
-> Escalation (WhatsApp), live WebSocket timers, and platform hardening are the next phases.
+> **Status:** Phase 0–2a complete — the full vertical slice (edge vision → Kafka →
+> ingest → PostgreSQL → API → dashboard) plus a durable, **exactly-once escalation
+> engine**: durable Postgres timers, an Operator → Floor Manager → Plant Director → Critical
+> state machine, a transactional outbox, on-call routing, and WhatsApp/SMS notifications
+> (with a fail-closed inbound webhook). All suites green in CI — 146 cloud tests on real
+> Postgres + Kafka containers, plus the edge and frontend suites. Live WebSocket timers
+> and platform hardening are the next phases.
 
 ## Architecture
 
@@ -43,4 +49,4 @@ See [`factory-monitor-ai/README.md`](factory-monitor-ai/README.md) for the quick
   real clip with people/PPE at `factory-monitor-ai/footage/raw/source.mp4` and run the
   footage prep script (see the app README). The automated tests stub the detector and
   need no footage.
-- Built collaboratively with AI pair-programming (commits carry `Co-Authored-By` trailers).
+- Built with AI-assisted development tooling; architecture, scope, and engineering decisions are the author's own.

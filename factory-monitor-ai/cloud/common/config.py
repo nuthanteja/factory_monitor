@@ -29,6 +29,20 @@ class Settings(BaseSettings):
 
     # Escalation timing
     operator_grace_seconds: int = 120
+    escalation_lease_seconds: int = 30
+
+    # Notification provider chain
+    notify_provider_chain: str = "console"  # comma-separated: whatsapp,sms,console
+
+    # Twilio credentials (optional — required when chain includes whatsapp or sms)
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_whatsapp_from: str | None = None  # E.164, e.g. +14155238886
+    twilio_sms_from: str | None = None       # E.164
+
+    # Twilio
+    # TWILIO_SKIP_SIGNATURE_CHECK — deliberate dev/test opt-in only
+    twilio_skip_signature_check: bool = False
 
 
 @lru_cache(maxsize=1)

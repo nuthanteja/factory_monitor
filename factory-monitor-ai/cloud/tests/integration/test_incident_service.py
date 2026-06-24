@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from alembic import command
-from alembic.config import Config
-
-from cloud.common.schemas.anomaly import AnomalyEvent
 from cloud.common.db.models import Incident, IncidentEvent
-from cloud.ingest_worker.service import create_incident_from_anomaly, IncidentResult
+from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.ingest_worker.service import IncidentResult, create_incident_from_anomaly
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
 
@@ -56,7 +55,7 @@ def _make_event(**overrides) -> AnomalyEvent:
         event_id=str(uuid.uuid4()),
         anomaly_type="ppe_no_hardhat",
         rule_id="PPE_NO_HARDHAT",
-        occurred_at=datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 6, 22, 10, 15, 3, 412000, tzinfo=UTC),
         site_id="plant-01",
         camera_id="cam_01",
         zone_id="zone_weld_bay",
@@ -92,12 +91,14 @@ async def test_new_event_creates_one_incident_and_one_event(session_factory):
     assert result.incident_id is not None
 
     async with session_factory() as s:
-        inc = (await s.execute(select(Incident).where(Incident.id == result.incident_id))).scalar_one()
+        inc = (
+            await s.execute(select(Incident).where(Incident.id == result.incident_id))
+        ).scalar_one()
         assert inc.status.value == "AWAITING_OPERATOR"
         assert inc.current_tier == 0
         assert inc.dedup_key == event.dedup_key
         assert inc.next_fire_at is not None
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # next_fire_at should be ≈ now + 120s; allow ±30s window for flakiness
         _nfa = inc.next_fire_at
         if _nfa.tzinfo is None:

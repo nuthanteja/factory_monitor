@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
+from cloud.common.on_call_resolver import resolve as _resolve_on_call
 from cloud.common.schemas.anomaly import AnomalyEvent
-from cloud.ingest_worker.service import create_incident_from_anomaly
+from cloud.ingest_worker.service import OnCallResolverFn, create_incident_from_anomaly
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,15 @@ async def handle_message(
     *,
     dlq_topic: str,
     grace_seconds: int,
+    on_call_resolver: OnCallResolverFn | None = None,
 ) -> str:
     """Validate one record, route malformed to DLQ, else create an incident.
 
     Returns one of: "created", "duplicate_event_id", "duplicate_open_dedup", "dlq".
     DB is committed BEFORE the caller commits the Kafka offset.
+
+    When on_call_resolver is provided the tier-0 OPERATOR outbox row is enqueued
+    atomically in the same transaction (§3.2 / §6 design spec).
     """
     try:
         event = AnomalyEvent.model_validate_json(raw_value)
@@ -42,7 +47,8 @@ async def handle_message(
 
     async with session_maker() as session:
         result = await create_incident_from_anomaly(
-            session, event, grace_seconds=grace_seconds
+            session, event, grace_seconds=grace_seconds,
+            on_call_resolver=on_call_resolver,
         )
         if result.created:
             await session.commit()
@@ -100,6 +106,7 @@ class IngestConsumer:
                         msg.key,
                         dlq_topic=self._settings.kafka_dlq_topic,
                         grace_seconds=self._settings.operator_grace_seconds,
+                        on_call_resolver=_resolve_on_call,
                     )
                     # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
                     # BEFORE we commit the Kafka offset here.

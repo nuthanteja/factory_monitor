@@ -179,6 +179,36 @@ services:
       timeout: 3s
       retries: 5
 
+  escalation_worker:
+    build:
+      context: .
+      dockerfile: cloud/escalation_worker/Dockerfile
+    image: factory-monitor/escalation-worker:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
+      REDIS_URL: "redis://redis:6379/0"
+      NOTIFY_PROVIDER_CHAIN: "console"
+      OPERATOR_GRACE_SECONDS: "120"
+      ESCALATION_LEASE_SECONDS: "30"
+    restart: unless-stopped
+
+  notifier_worker:
+    build:
+      context: .
+      dockerfile: cloud/notifier_worker/Dockerfile
+    image: factory-monitor/notifier-worker:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
+      REDIS_URL: "redis://redis:6379/0"
+      NOTIFY_PROVIDER_CHAIN: "console"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   kafkadata:

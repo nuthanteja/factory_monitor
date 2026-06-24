@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pytest
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
 # Use confluentinc/cp-kafka:7.6.0 (same image as Tasks 8 & 11):
 # apache/kafka:3.7.0 lacks /etc/confluent/docker/configure and is incompatible
 # with testcontainers' KafkaContainer startup script.

@@ -5,6 +5,7 @@ import logging
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import ConsumerStoppedError
+from opentelemetry import trace as _otel_trace
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -13,11 +14,13 @@ from cloud.common.db.session import session_factory
 from cloud.common.on_call_resolver import resolve as _resolve_on_call
 from cloud.common.redis_client import get_redis
 from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.common.telemetry import extract_trace_context
 from cloud.common.ws_events import CHANGE_CREATED, incident_change
 from cloud.common.ws_publisher import publish_incident_event
 from cloud.ingest_worker.service import OnCallResolverFn, create_incident_from_anomaly
 
 logger = logging.getLogger(__name__)
+_tracer = _otel_trace.get_tracer("factory_monitor.ingest_worker")
 
 
 async def handle_message(
@@ -111,34 +114,43 @@ class IngestConsumer:
             async for msg in self._consumer:
                 if not self._running:
                     break
-                try:
-                    status = await handle_message(
-                        self._session_maker,
-                        self._producer,
-                        msg.value,
-                        msg.key,
-                        dlq_topic=self._settings.kafka_dlq_topic,
-                        grace_seconds=self._settings.operator_grace_seconds,
-                        on_call_resolver=_resolve_on_call,
-                        redis_publisher=lambda ch: publish_incident_event(
-                            self._redis, self._settings.ws_redis_channel, ch
-                        ),
-                    )
-                    # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
-                    # BEFORE we commit the Kafka offset here.
-                    # A crash between them re-delivers the event; Task 10's source_event_id
-                    # unique constraint makes re-delivery a no-op.
-                    await self._consumer.commit()
-                    logger.debug(
-                        "processed offset=%s partition=%s status=%s",
-                        msg.offset, msg.partition, status,
-                    )
-                except Exception:
-                    logger.exception(
-                        "unexpected error processing message topic=%s partition=%s offset=%s"
-                        " — offset NOT committed (redelivery guaranteed)",
-                        msg.topic, msg.partition, msg.offset,
-                    )
-                    raise
+                parent_ctx = extract_trace_context(msg.headers)
+                with _tracer.start_as_current_span(
+                    "ingest.consume",
+                    context=parent_ctx,
+                    attributes={
+                        "messaging.kafka.topic": msg.topic,
+                        "messaging.kafka.partition": msg.partition,
+                    },
+                ):
+                    try:
+                        status = await handle_message(
+                            self._session_maker,
+                            self._producer,
+                            msg.value,
+                            msg.key,
+                            dlq_topic=self._settings.kafka_dlq_topic,
+                            grace_seconds=self._settings.operator_grace_seconds,
+                            on_call_resolver=_resolve_on_call,
+                            redis_publisher=lambda ch: publish_incident_event(
+                                self._redis, self._settings.ws_redis_channel, ch
+                            ),
+                        )
+                        # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
+                        # BEFORE we commit the Kafka offset here.
+                        # A crash between them re-delivers the event; Task 10's source_event_id
+                        # unique constraint makes re-delivery a no-op.
+                        await self._consumer.commit()
+                        logger.debug(
+                            "processed offset=%s partition=%s status=%s",
+                            msg.offset, msg.partition, status,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "unexpected error processing message topic=%s partition=%s offset=%s"
+                            " — offset NOT committed (redelivery guaranteed)",
+                            msg.topic, msg.partition, msg.offset,
+                        )
+                        raise
         except (ConsumerStoppedError, asyncio.CancelledError):
             logger.info("consumer stopped gracefully")

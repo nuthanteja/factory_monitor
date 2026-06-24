@@ -18,7 +18,7 @@ from testcontainers.postgres import PostgresContainer
 from cloud.common.db.models import Incident, Outbox
 from cloud.common.on_call_resolver import resolve as on_call_resolve
 from cloud.common.seed_demo import seed_demo_roster, seed_demo_tiers
-from cloud.ingest_worker.consumer import handle_message
+from cloud.ingest_worker.consumer import IngestConsumer, handle_message
 
 DLQ_TOPIC = "vision.anomalies.dlq"
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -207,3 +207,107 @@ async def test_handle_message_with_resolver_enqueues_tier0_outbox(
     assert row.to_phone_e164 == "+15550000001"  # Demo Operator phone from seed
     assert row.template_name == "operator_alert_v1"
     assert row.idempotency_key == f"{incident.id}|0"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ingest_consume_span_continues_producer_trace(
+    kafka_container: KafkaContainer,
+    migrated_url: str,
+):
+    """ingest.consume span must share the producer's trace_id (cross-Kafka linkage)."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from cloud.common.config import Settings
+    from cloud.common.kafka import publish_event
+    from cloud.common.schemas.anomaly import AnomalyEvent
+    from cloud.common.telemetry import reset_telemetry, setup_telemetry
+
+    exporter = InMemorySpanExporter()
+    reset_telemetry()
+    setup_telemetry("ingest-test", exporter=exporter)
+
+    bootstrap = kafka_container.get_bootstrap_server()
+    topic = "vision.anomalies.v1"
+
+    # Build a Settings that points to the testcontainers
+    sync_url = migrated_url.replace("postgresql+asyncpg://", "postgresql://")
+    settings = Settings(
+        database_url=migrated_url,
+        alembic_database_url=sync_url,
+        kafka_bootstrap_servers=bootstrap,
+        kafka_anomalies_topic=topic,
+        kafka_dlq_topic=DLQ_TOPIC,
+        kafka_consumer_group=f"span-test-{uuid.uuid4()}",
+        ws_fanout_enabled=False,
+    )
+
+    # Produce one message inside a parent span so traceparent header is injected
+    edge_producer = AIOKafkaProducer(bootstrap_servers=bootstrap)
+    await edge_producer.start()
+    try:
+        tracer = trace.get_tracer("t")
+        with tracer.start_as_current_span("edge.detect") as producer_span:
+            producer_tid = producer_span.get_span_context().trace_id
+            producer_sid = producer_span.get_span_context().span_id
+            sample_event = AnomalyEvent.model_validate({
+                "schema_version": "1.0",
+                "event_id": str(uuid.uuid4()),
+                "anomaly_type": "ppe_no_hardhat",
+                "rule_id": "PPE_NO_HARDHAT",
+                "occurred_at": "2026-06-24T10:15:03.412Z",
+                "site_id": "plant-01",
+                "camera_id": "cam_01",
+                "zone_id": "zone_weld_bay",
+                "track_id": "cam_01:9999",
+                "object_class": "person",
+                "severity": "high",
+                "confidence": 0.91,
+                "dedup_key": f"span-test|cam_01|PPE_NO_HARDHAT|{uuid.uuid4().hex[:8]}",
+                "evidence": {
+                    "bbox": [880, 412, 130, 348],
+                    "snapshot_url": "",
+                    "footage_source": "clip_03",
+                },
+                "source": "edge",
+            })
+            await publish_event(edge_producer, topic, sample_event)
+    finally:
+        await edge_producer.stop()
+
+    # Start the IngestConsumer and run it via run_forever (the span lives in the loop)
+    ingest = IngestConsumer(settings)
+    await ingest.start()
+    run_task = asyncio.create_task(ingest.run_forever())
+
+    # Poll until the ingest.consume span appears (or timeout)
+    deadline = asyncio.get_event_loop().time() + 30.0
+    consume_spans = []
+    while asyncio.get_event_loop().time() < deadline:
+        consume_spans = [
+            s for s in exporter.get_finished_spans() if s.name == "ingest.consume"
+        ]
+        if consume_spans:
+            break
+        await asyncio.sleep(0.2)
+
+    # Stop the consumer (sets _running=False; the loop exits at the next iteration guard)
+    await ingest.stop()
+    try:
+        await asyncio.wait_for(run_task, timeout=5.0)
+    except (asyncio.CancelledError, TimeoutError):
+        run_task.cancel()
+
+    assert consume_spans, "expected an ingest.consume span — none found"
+    span = consume_spans[0]
+    assert span.context.trace_id == producer_tid, (
+        f"ingest.consume trace_id {span.context.trace_id:#x} "
+        f"!= producer trace_id {producer_tid:#x}"
+    )
+    # The ingest.consume span's parent must be the edge.detect span
+    assert span.parent is not None, "ingest.consume span has no parent"
+    assert span.parent.span_id == producer_sid, (
+        f"ingest.consume parent span_id {span.parent.span_id:#x} "
+        f"!= producer span_id {producer_sid:#x}"
+    )

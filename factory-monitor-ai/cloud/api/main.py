@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from cloud.api.deps import get_session_maker
@@ -8,11 +10,28 @@ from cloud.api.twilio_webhook import webhook_router
 from cloud.api.ws import ws_router
 from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
+from cloud.common.redis_client import close_redis, get_redis
+from cloud.common.ws.fanout import start_ws_fanout, stop_ws_fanout
 from cloud.common.ws.manager import ConnectionManager
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="Factory Monitor API", version="1.0.0")
+    _settings = settings or Settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):  # noqa: ANN001
+        # --- startup ---
+        if _settings.ws_fanout_enabled:
+            app.state.ws_redis = get_redis(_settings)
+            await start_ws_fanout(app)
+        # --- yield to serve requests ---
+        yield
+        # --- shutdown ---
+        if _settings.ws_fanout_enabled:
+            await stop_ws_fanout(app)
+            await close_redis()
+
+    app = FastAPI(title="Factory Monitor API", version="1.0.0", lifespan=lifespan)
     app.include_router(router)
     app.include_router(webhook_router)
     app.include_router(ws_router)

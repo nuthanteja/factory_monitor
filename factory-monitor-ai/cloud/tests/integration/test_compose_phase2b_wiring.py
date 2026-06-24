@@ -46,21 +46,21 @@ def test_api_service_has_redis_url() -> None:
 
 def test_api_service_has_ws_env_keys() -> None:
     env = _api_env()
-    required = {"WS_CHANNEL", "WS_POLL_INTERVAL_SECONDS"}
+    required = {"WS_REDIS_CHANNEL", "WS_FALLBACK_POLL_SECONDS", "WS_FALLBACK_BATCH"}
     missing = required - set(env.keys())
     assert not missing, f"api missing WS env keys: {missing}"
 
 
 def test_api_ws_channel_matches_dashboard_incidents() -> None:
     env = _api_env()
-    assert env["WS_CHANNEL"] == "dashboard:incidents", (
-        "WS_CHANNEL must match the producer PUBLISH channel name (dashboard:incidents)"
+    assert env["WS_REDIS_CHANNEL"] == "dashboard:incidents", (
+        "WS_REDIS_CHANNEL must match the producer PUBLISH channel name (dashboard:incidents)"
     )
 
 
 def test_env_example_declares_phase2b_vars() -> None:
     text = _env_example()
-    for key in ("WS_CHANNEL", "WS_POLL_INTERVAL_SECONDS"):
+    for key in ("WS_REDIS_CHANNEL", "WS_FALLBACK_POLL_SECONDS", "WS_FALLBACK_BATCH"):
         assert key in text, f".env.example missing {key}"
 
 

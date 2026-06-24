@@ -116,8 +116,9 @@ services:
       KAFKA_CONSUMER_GROUP: "ingest-worker"
       OPERATOR_GRACE_SECONDS: "120"
       REDIS_URL: "redis://redis:6379/0"
-      WS_CHANNEL: "dashboard:incidents"
-      WS_POLL_INTERVAL_SECONDS: "2.0"
+      WS_REDIS_CHANNEL: "dashboard:incidents"
+      WS_FALLBACK_POLL_SECONDS: "1.0"
+      WS_FALLBACK_BATCH: "200"
     ports:
       - "8000:8000"
     healthcheck:

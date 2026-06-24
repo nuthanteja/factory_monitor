@@ -31,10 +31,7 @@ class Settings(BaseSettings):
     ws_redis_channel: str = "dashboard:incidents"
     ws_fallback_poll_seconds: float = 1.0  # Postgres-poll fallback cadence when Redis is down
     ws_fallback_batch: int = 200           # max incidents re-broadcast per fallback poll
-
-    # Compose-level WS env vars (Phase 2b config wiring)
-    ws_channel: str = "dashboard:incidents"
-    ws_poll_interval_seconds: float = 2.0
+    ws_fanout_enabled: bool = True         # gate: set False in tests to skip Redis/fanout startup
 
     # Escalation timing
     operator_grace_seconds: int = 120

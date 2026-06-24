@@ -25,6 +25,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -168,7 +169,7 @@ def app(async_url: str):
     """
     engine = create_async_engine(async_url, future=True)
     maker = async_sessionmaker(engine, expire_on_commit=False)
-    a = create_app()
+    a = create_app(Settings(ws_fanout_enabled=False))
     a.dependency_overrides[get_session_maker] = lambda: maker
     a.state.ws_session_maker = maker
     return a

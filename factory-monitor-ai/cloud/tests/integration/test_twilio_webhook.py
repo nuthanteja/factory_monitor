@@ -21,6 +21,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import (
     Incident,
     IncidentEvent,
@@ -77,7 +78,7 @@ async def maker(migrated_url: str):
 async def client(maker):
     import os
     os.environ["TWILIO_AUTH_TOKEN"] = TWILIO_AUTH_TOKEN
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: maker
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -275,9 +276,9 @@ async def test_no_auth_token_fails_closed(maker):
     # Ensure no token and skip flag not set
     env_without_token = {k: v for k, v in os.environ.items() if k != "TWILIO_AUTH_TOKEN"}
     with patch.dict(os.environ, env_without_token, clear=True):
-        from cloud.common.config import get_settings
+        from cloud.common.config import Settings, get_settings
         get_settings.cache_clear()
-        app = create_app()
+        app = create_app(Settings(ws_fanout_enabled=False))
         # Override session maker so the app can boot; request should 403 before DB
         engine = create_async_engine(
             # Use a dummy URL — should never reach DB on 403 path

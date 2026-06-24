@@ -14,6 +14,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import Incident, IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -80,7 +81,7 @@ async def seeded_incident_id(session_maker):
 
 @pytest_asyncio.fixture
 async def client(session_maker):
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: session_maker
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

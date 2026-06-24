@@ -15,6 +15,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import Incident, IncidentEvent, IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -52,7 +53,7 @@ async def maker(migrated_url: str):
 
 @pytest_asyncio.fixture
 async def client(maker):
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: maker
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -257,7 +258,7 @@ class _Boom:
 @pytest_asyncio.fixture
 async def client_with_recorder(maker):
     """App wired with a recording fake at app.state.ws_redis (no live Redis)."""
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: maker
     rec = _Recorder()
     app.state.ws_redis = rec
@@ -269,7 +270,7 @@ async def client_with_recorder(maker):
 @pytest_asyncio.fixture
 async def client_with_boom(maker):
     """App wired with an exploding publisher at app.state.ws_redis."""
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: maker
     app.state.ws_redis = _Boom()
     transport = ASGITransport(app=app)

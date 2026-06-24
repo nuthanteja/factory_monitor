@@ -3,13 +3,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, Header, status
+from fastapi import APIRouter, Body, Depends, Header, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.api.deps import get_session_maker
-from cloud.common.config import get_settings
 from cloud.common.db.models import Incident
 from cloud.common.incident_actions import (
     acknowledge_incident as _ack_incident,
@@ -17,14 +16,12 @@ from cloud.common.incident_actions import (
 from cloud.common.incident_actions import (
     resolve_incident as _resolve_incident,
 )
-from cloud.common.redis_client import get_redis
 from cloud.common.schemas.incident import IncidentListResponse, IncidentOut
 from cloud.common.ws_events import (
     CHANGE_RESOLVED,
     CHANGE_UPDATED,
     incident_change,
 )
-from cloud.common.ws_publisher import publish_incident_event
 
 router = APIRouter()
 
@@ -46,17 +43,18 @@ async def _publish_after(
 ) -> None:
     """Best-effort publish of a compact change AFTER the txn committed.
 
-    `publisher` is either a bound callable (tests inject a recorder) or None;
-    in the live app the route builds one from the shared Redis client. Any
-    failure is swallowed by publish_incident_event / the callable contract.
+    `publisher` is either a bound callable (tests inject a recorder or a
+    redis-backed wrapper) or None.  None is a TRUE no-op — no live-Redis
+    attempt is made.  Any callable failure is swallowed (best-effort).
+
+    In production, the route handler passes ``request.app.state.ws_redis``
+    (set by Task 25's lifespan).  In lightweight route tests the lifespan does
+    not run, so ``app.state.ws_redis`` is absent → None → silent no-op.
     """
-    change = incident_change(change_type, incident_id, **fields)
     if publisher is None:
-        settings = get_settings()
-        await publish_incident_event(
-            get_redis(settings), settings.ws_redis_channel, change
-        )
-    elif callable(publisher):
+        return
+    change = incident_change(change_type, incident_id, **fields)
+    if callable(publisher):
         try:
             await publisher(change)
         except Exception:  # noqa: BLE001 — best-effort even with an injected publisher
@@ -87,6 +85,7 @@ async def list_incidents(
     status_code=status.HTTP_200_OK,
 )
 async def acknowledge_incident(
+    request: Request,
     incident_id: uuid.UUID,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     session_maker: async_sessionmaker = Depends(get_session_maker),
@@ -100,7 +99,8 @@ async def acknowledge_incident(
         inc = await _ack_incident(session, incident_id, idempotency_key=idempotency_key)
         await session.commit()
 
-    await _publish_after(None, CHANGE_UPDATED, inc.id, status="ACK")
+    redis = getattr(request.app.state, "ws_redis", None)
+    await _publish_after(redis, CHANGE_UPDATED, inc.id, status="ACK")
     return _ActionOut(incident_id=str(inc.id), status="ACK")
 
 
@@ -110,6 +110,7 @@ async def acknowledge_incident(
     status_code=status.HTTP_200_OK,
 )
 async def resolve_incident(
+    request: Request,
     incident_id: uuid.UUID,
     body: _ResolveBody = Body(default_factory=_ResolveBody),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -125,5 +126,6 @@ async def resolve_incident(
         )
         await session.commit()
 
-    await _publish_after(None, CHANGE_RESOLVED, inc.id, resolved_at=inc.resolved_at)
+    redis = getattr(request.app.state, "ws_redis", None)
+    await _publish_after(redis, CHANGE_RESOLVED, inc.id, resolved_at=inc.resolved_at)
     return _ActionOut(incident_id=str(inc.id), status="RESOLVED")

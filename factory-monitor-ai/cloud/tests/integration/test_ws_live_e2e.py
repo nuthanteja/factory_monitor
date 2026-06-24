@@ -15,12 +15,24 @@ in the TestClient loop receives and broadcasts them to the connected WS client.
 
 Frame-draining uses concurrent.futures with a wall-clock deadline (matching the
 pattern in test_ws_live_endpoint.py) so no fixed sleeps are needed.
+
+Publish isolation notes by step:
+- CREATE: a real ``redis_publisher`` callable (matching the shape used by the
+  production ``IngestConsumer`` in ``consumer.py``) is built in the test and
+  called after commit, so the CREATE step exercises the true
+  writer→publisher→Redis→subscriber→WS path end-to-end.
+- Tier-advance + ack: the worker's ``run_once()`` does NOT publish (only
+  ``run_until_stopped`` does) and the ack publish is via ``app.state.ws_redis``
+  (route-level), so those two steps publish directly to isolate the Redis
+  fan-out path; the writer→publisher wiring for those paths is covered by the
+  Task-10 writer-publish tests in ``test_writer_publish.py``.
 """
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures
 import contextlib
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -103,16 +115,23 @@ def _drain_until(ws, *types: str, timeout: float = 8.0) -> dict:
     Skips system.heartbeat / timer.snapshot re-anchor frames.  Uses a
     ThreadPoolExecutor to impose a wall-clock deadline on each blocking
     ws.receive_json() call so the test never hangs indefinitely.
+
+    Uses time.monotonic() to compute a fixed deadline once so per-frame
+    overhead does not accumulate into a spurious timeout.
     """
     wanted = set(types)
-    deadline = timeout
+    deadline = time.monotonic() + timeout
 
     def _read_one() -> dict:
         return ws.receive_json()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        remaining = deadline
-        while remaining > 0:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError(
+                    f"did not receive any of {wanted} within {timeout}s"
+                )
             fut = pool.submit(_read_one)
             try:
                 frame = fut.result(timeout=remaining)
@@ -122,9 +141,7 @@ def _drain_until(ws, *types: str, timeout: float = 8.0) -> dict:
                 ) from exc
             if frame.get("type") in wanted:
                 return frame
-            # Not our frame — keep draining; subtract a tiny floor.
-            remaining -= 0.01
-    raise AssertionError(f"did not receive any of {wanted} within {timeout}s")
+            # Not our frame — recompute remaining on next iteration.
 
 
 @contextlib.contextmanager
@@ -269,20 +286,36 @@ async def test_ws_live_full_lifecycle(app, maker, pub_client):
     """Full incident lifecycle delivered over /ws/live via the REAL Redis publish path.
 
     Flow proven:
-      create_incident_from_anomaly → publish_incident_event (Redis PUBLISH) →
-      RedisFanoutSubscriber (in TestClient's loop) → ConnectionManager.broadcast →
-      WS client receives incident.created
+      CREATE (true writer→WS e2e):
+        create_incident_from_anomaly (DB write + commit) →
+        redis_publisher callable (matching IngestConsumer's shape in consumer.py) →
+        publish_incident_event → Redis PUBLISH →
+        RedisFanoutSubscriber (in TestClient's loop) → ConnectionManager.broadcast →
+        WS client receives incident.created
 
-      _make_incident_due + EscalationWorker.run_once → publish_incident_event →
-      … same path … → WS client receives incident.tier_advanced
+      TIER-ADVANCE (Redis fan-out isolated):
+        _make_incident_due + EscalationWorker.run_once (DB write, no publish from
+        run_once) → direct publish_incident_event → … same Redis path … →
+        WS client receives incident.tier_advanced
 
-      acknowledge_incident → publish_incident_event →
-      … same path … → WS client receives incident.updated
+      ACK (Redis fan-out isolated):
+        acknowledge_incident (DB write, no publish — route-level publish skipped
+        because no app.state.ws_redis in test) → direct publish_incident_event →
+        … same Redis path … → WS client receives incident.updated
+
+    The writer→publisher wiring for tier-advance (run_until_stopped) and ack
+    (ack route + app.state.ws_redis) is covered by test_writer_publish.py.
 
     Assertions: correct IncidentView shape, monotonic seq, server_now present.
     """
     session_maker = maker
     event = _make_anomaly_event()
+
+    # Build a redis_publisher callable matching the shape used by IngestConsumer
+    # in consumer.py: async (change: dict) -> bool.  This is the REAL writer path
+    # for CREATE — the same lambda shape the production consumer passes.
+    async def _redis_publisher(change: dict) -> bool:
+        return await publish_incident_event(pub_client, _WS_CHANNEL, change)
 
     with TestClient(app) as http:
         with _ws_session(http, "/ws/live") as ws:
@@ -302,12 +335,9 @@ async def test_ws_live_full_lifecycle(app, maker, pub_client):
             assert res.created is True
             incident_id = res.incident_id
 
-            # Publish the CHANGE_CREATED event to Redis → subscriber broadcasts.
-            ok = await publish_incident_event(
-                pub_client,
-                _WS_CHANNEL,
-                incident_change(CHANGE_CREATED, incident_id),
-            )
+            # Publish via the REAL redis_publisher callable (writer→publisher→Redis
+            # path proven end-to-end: same shape as IngestConsumer in consumer.py).
+            ok = await _redis_publisher(incident_change(CHANGE_CREATED, incident_id))
             assert ok is True, "Redis publish must succeed"
 
             created = _drain_until(ws, "incident.created", timeout=8.0)
@@ -343,7 +373,9 @@ async def test_ws_live_full_lifecycle(app, maker, pub_client):
                 assert inc.current_tier == 1
                 assert inc.deadline_at is not None
 
-            # Publish tier-advanced event over the REAL Redis path.
+            # fan-out isolated: the production caller (worker run_until_stopped / ack route)
+            # wires the publisher — covered by test_writer_publish.py; here we publish
+            # directly to exercise the Redis fan-out.
             ok = await publish_incident_event(
                 pub_client,
                 _WS_CHANNEL,
@@ -374,7 +406,9 @@ async def test_ws_live_full_lifecycle(app, maker, pub_client):
                 assert inc.next_fire_at is None
                 assert inc.deadline_at is None
 
-            # Publish updated event over the REAL Redis path.
+            # fan-out isolated: the production caller (worker run_until_stopped / ack route)
+            # wires the publisher — covered by test_writer_publish.py; here we publish
+            # directly to exercise the Redis fan-out.
             ok = await publish_incident_event(
                 pub_client,
                 _WS_CHANNEL,

@@ -23,7 +23,10 @@ export class MockWebSocket implements WebSocketLike {
   }
 
   close(): void {
+    if (this.closed) return;
     this.closed = true;
+    // Mirror real WebSocket: close() fires onclose so onerror→close path works.
+    this.onclose?.();
   }
 
   // --- test helpers ---

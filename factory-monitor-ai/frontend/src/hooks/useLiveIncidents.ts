@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   applyEnvelope,
@@ -6,13 +6,13 @@ import {
   selectSortedIncidents,
   type LiveState,
 } from "../lib/liveReducer";
-import { ServerClock, WS_TOPICS } from "../lib/serverClock";
+import { incidentToView, ServerClock, WS_TOPICS } from "../lib/serverClock";
 import type {
   AnyWsEnvelope,
   IncidentView,
   SubscribeMessage,
 } from "../lib/wsContract";
-import { INCIDENTS_QUERY_KEY } from "./useIncidents";
+import { INCIDENTS_QUERY_KEY, useIncidents } from "./useIncidents";
 
 export interface WebSocketLike {
   send(data: string): void;
@@ -69,10 +69,22 @@ export function useLiveIncidents(
   const closedByUsRef = useRef<boolean>(false);
   const socketRef = useRef<WebSocketLike | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether the WS reducer has received its first snapshot (lastSeq > 0).
+  const [wsReady, setWsReady] = useState(false);
 
-  const [incidents, setIncidents] = useState<IncidentView[]>([]);
+  const [wsIncidents, setWsIncidents] = useState<IncidentView[]>([]);
   const [connected, setConnected] = useState(false);
   const [lastServerNowIso, setLastServerNowIso] = useState<string | null>(null);
+
+  // Fix 1: REST seed — poll REST while WS snapshot hasn't arrived yet.
+  const restQuery = useIncidents();
+  const restIncidents = useMemo<IncidentView[]>(() => {
+    if (!restQuery.data) return [];
+    return restQuery.data.incidents.map(incidentToView);
+  }, [restQuery.data]);
+
+  // Expose REST data before the first WS snapshot; WS state is authoritative after.
+  const incidents = wsReady ? wsIncidents : restIncidents;
 
   useEffect(() => {
     closedByUsRef.current = false;
@@ -106,17 +118,25 @@ export function useLiveIncidents(
         stateRef.current = res.state;
         lastSeqRef.current = res.state.lastSeq;
         clockRef.current.update(env.server_now);
-        setIncidents(selectSortedIncidents(res.state));
+        const sorted = selectSortedIncidents(res.state);
+        setWsIncidents(sorted);
+        setWsReady(true);
         setLastServerNowIso(res.state.lastServerNowIso);
         if (res.gap) {
           void queryClient.invalidateQueries({ queryKey: INCIDENTS_QUERY_KEY });
         }
       };
 
+      // Fix 3: clear any pending timer before scheduling a new one to avoid
+      // stacking timers on rapid close/error events.
       const scheduleReconnect = () => {
         setConnected(false);
         if (closedByUsRef.current) {
           return;
+        }
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
         }
         const delay = Math.min(
           maxBackoffMs,
@@ -127,12 +147,29 @@ export function useLiveIncidents(
       };
 
       ws.onclose = scheduleReconnect;
+
+      // Fix 2: call scheduleReconnect directly in onerror so reconnect doesn't
+      // depend on a subsequent onclose event (which the mock / some browsers
+      // may not always fire after an error).
+      let reconnectScheduledByError = false;
       ws.onerror = () => {
+        reconnectScheduledByError = true;
+        scheduleReconnect();
         try {
           ws.close();
         } catch {
           /* noop */
         }
+      };
+
+      // Guard: if onclose fires after onerror already scheduled a reconnect,
+      // skip double-scheduling.
+      const originalOnclose = ws.onclose;
+      ws.onclose = (ev) => {
+        if (reconnectScheduledByError) {
+          return;
+        }
+        originalOnclose(ev);
       };
     };
 

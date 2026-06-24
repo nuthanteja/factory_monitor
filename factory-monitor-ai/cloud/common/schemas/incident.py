@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
+
+from cloud.common.ws.incident_view import tier_label_for
 
 
 class IncidentOut(BaseModel):
@@ -19,6 +21,8 @@ class IncidentOut(BaseModel):
     current_tier: int
     created_at: datetime
     snapshot_url: str | None
+    object_class: str | None
+    deadline_at: datetime | None
 
     @field_validator("status", "anomaly_type", "severity", mode="before")
     @classmethod
@@ -31,6 +35,11 @@ class IncidentOut(BaseModel):
         if v == "":
             return None
         return v
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tier_label(self) -> str:
+        return tier_label_for(self.status, self.current_tier)
 
 
 class IncidentListResponse(BaseModel):

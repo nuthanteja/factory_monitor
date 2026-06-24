@@ -90,3 +90,30 @@ def test_ws_fanout_settings_have_defaults_and_env_override(monkeypatch):
     assert s2.ws_redis_channel == "dashboard:incidents:test"
     assert s2.ws_fallback_poll_seconds == 0.25
     assert s2.ws_fallback_batch == 50
+
+
+def test_ws_channel_default(monkeypatch):
+    monkeypatch.delenv("WS_CHANNEL", raising=False)
+    s = _fresh_settings(
+        monkeypatch,
+        DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
+        ALEMBIC_DATABASE_URL="postgresql://u:p@localhost:5432/db",
+        KAFKA_BOOTSTRAP_SERVERS="localhost:9092",
+        REDIS_URL="redis://localhost:6379/0",
+    )
+    assert s.ws_channel == "dashboard:incidents"
+    assert s.ws_poll_interval_seconds == 2.0
+
+
+def test_ws_env_override(monkeypatch):
+    s = _fresh_settings(
+        monkeypatch,
+        DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
+        ALEMBIC_DATABASE_URL="postgresql://u:p@localhost:5432/db",
+        KAFKA_BOOTSTRAP_SERVERS="localhost:9092",
+        REDIS_URL="redis://localhost:6379/0",
+        WS_CHANNEL="dashboard:custom",
+        WS_POLL_INTERVAL_SECONDS="0.5",
+    )
+    assert s.ws_channel == "dashboard:custom"
+    assert s.ws_poll_interval_seconds == 0.5

@@ -106,6 +106,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
       KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
@@ -114,6 +116,8 @@ services:
       KAFKA_CONSUMER_GROUP: "ingest-worker"
       OPERATOR_GRACE_SECONDS: "120"
       REDIS_URL: "redis://redis:6379/0"
+      WS_CHANNEL: "dashboard:incidents"
+      WS_POLL_INTERVAL_SECONDS: "2.0"
     ports:
       - "8000:8000"
     healthcheck:

@@ -94,11 +94,11 @@ with `{action:'subscribe', topics:[...], last_seq}`; on a forward `seq` gap it c
 `invalidateQueries()` to REST-resync.
 
 **Fan-out (Redis pub/sub primary + Postgres-poll fallback).** Producers (ingest +
-escalation transition) `PUBLISH` to the Redis channel `WS_CHANNEL`
+escalation transition) `PUBLISH` to the Redis channel `WS_REDIS_CHANNEL`
 (`dashboard:incidents`) inside/after the state-change transaction. The `api` service
 subscribes on startup (FastAPI lifespan) and translates each message into the WS
 envelope, broadcasting to all connected sockets. Redis is **non-authoritative**: if it
-is down, the API degrades to polling Postgres every `WS_POLL_INTERVAL_SECONDS` for
+is down, the API degrades to polling Postgres every `WS_FALLBACK_POLL_SECONDS` for
 changed incidents — no escalation correctness depends on Redis.
 
 **Server-authoritative timers.** All deadline math is Postgres `now()`. The browser

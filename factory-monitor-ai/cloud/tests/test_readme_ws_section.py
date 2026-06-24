@@ -33,3 +33,18 @@ def test_readme_describes_server_authoritative_timers() -> None:
         "README must describe the server-authoritative timer model"
     )
     assert "deadline_at" in text, "README must mention absolute deadline_at"
+
+
+def test_readme_uses_correct_ws_env_var_names() -> None:
+    text = _readme()
+    assert "WS_REDIS_CHANNEL" in text, "README must reference WS_REDIS_CHANNEL env var"
+    assert "WS_FALLBACK_POLL_SECONDS" in text, (
+        "README must reference WS_FALLBACK_POLL_SECONDS env var"
+    )
+    # Ensure old names are not present
+    assert "WS_CHANNEL" not in text or "WS_REDIS_CHANNEL" in text, (
+        "README must not reference bare WS_CHANNEL (should be WS_REDIS_CHANNEL)"
+    )
+    assert "WS_POLL_INTERVAL_SECONDS" not in text, (
+        "README must not reference deprecated WS_POLL_INTERVAL_SECONDS"
+    )

@@ -54,7 +54,14 @@ describe("useIncidentActions", () => {
   });
 
   it("acknowledge calls the API and optimistically sets status to ACK", async () => {
-    ackMock.mockResolvedValue({ incident_id: ID, status: "ACK" });
+    // Keep server response pending so we can assert the optimistic value
+    // before the mutation settles.
+    let resolveAck!: (v: { incident_id: string; status: string }) => void;
+    ackMock.mockReturnValue(
+      new Promise((res) => {
+        resolveAck = res;
+      }),
+    );
     const { client, wrapper } = setup();
     const { result } = renderHook(() => useIncidentActions(), { wrapper });
 
@@ -62,10 +69,21 @@ describe("useIncidentActions", () => {
       result.current.acknowledge.mutate({ id: ID });
     });
 
-    // optimistic patch is synchronous
-    const optimistic = client.getQueryData<IncidentsResponse>(INCIDENTS_QUERY_KEY);
-    expect(optimistic?.incidents[0].status).toBe("ACK");
+    // onMutate awaits cancelQueries before patching, so the optimistic value
+    // lands after the microtask queue drains — use waitFor.
+    await waitFor(() =>
+      expect(
+        client.getQueryData<IncidentsResponse>(INCIDENTS_QUERY_KEY),
+      ).toMatchObject({
+        incidents: [expect.objectContaining({ id: ID, status: "ACK" })],
+      }),
+    );
 
+    // Verify we haven't settled yet (still optimistic at this point).
+    expect(result.current.acknowledge.isPending).toBe(true);
+
+    // Let the server respond and confirm success.
+    resolveAck({ incident_id: ID, status: "ACK" });
     await waitFor(() => expect(result.current.acknowledge.isSuccess).toBe(true));
     expect(ackMock).toHaveBeenCalledWith(ID);
   });
@@ -85,16 +103,34 @@ describe("useIncidentActions", () => {
   });
 
   it("resolve calls the API with the note and sets status to RESOLVED", async () => {
-    resolveMock.mockResolvedValue({ incident_id: ID, status: "RESOLVED" });
+    // Keep server response pending so we can assert the optimistic value.
+    let resolveResolve!: (v: { incident_id: string; status: string }) => void;
+    resolveMock.mockReturnValue(
+      new Promise((res) => {
+        resolveResolve = res;
+      }),
+    );
     const { client, wrapper } = setup();
     const { result } = renderHook(() => useIncidentActions(), { wrapper });
 
     act(() => {
       result.current.resolve.mutate({ id: ID, note: "done" });
     });
-    const optimistic = client.getQueryData<IncidentsResponse>(INCIDENTS_QUERY_KEY);
-    expect(optimistic?.incidents[0].status).toBe("RESOLVED");
 
+    // Optimistic patch lands after cancelQueries microtask — use waitFor.
+    await waitFor(() =>
+      expect(
+        client.getQueryData<IncidentsResponse>(INCIDENTS_QUERY_KEY),
+      ).toMatchObject({
+        incidents: [expect.objectContaining({ id: ID, status: "RESOLVED" })],
+      }),
+    );
+
+    // Still pending (optimistic, not settled).
+    expect(result.current.resolve.isPending).toBe(true);
+
+    // Let the server respond.
+    resolveResolve({ incident_id: ID, status: "RESOLVED" });
     await waitFor(() => expect(result.current.resolve.isSuccess).toBe(true));
     expect(resolveMock).toHaveBeenCalledWith(ID, "done");
   });

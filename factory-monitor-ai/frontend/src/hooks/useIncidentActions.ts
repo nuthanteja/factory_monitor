@@ -50,17 +50,18 @@ export function useIncidentActions(): IncidentActions {
     id: string,
     nextStatus: string,
   ): Promise<OptimisticCtx> => {
-    // Snapshot and patch BEFORE awaiting cancelQueries so the cache update
-    // is visible synchronously to tests that call mutate() inside act().
+    // 1. Cancel in-flight refetches FIRST so a resolving poll cannot
+    //    overwrite the optimistic patch we are about to apply.
+    await queryClient.cancelQueries({ queryKey: INCIDENTS_QUERY_KEY });
+    // 2. Snapshot current data.
     const previous = queryClient.getQueryData<IncidentsResponse>(
       INCIDENTS_QUERY_KEY,
     );
+    // 3. Apply the optimistic patch.
     queryClient.setQueryData<IncidentsResponse>(
       INCIDENTS_QUERY_KEY,
       patchStatus(previous, id, nextStatus),
     );
-    // Cancel in-flight refetches after patching (avoids overwriting optimistic data).
-    await queryClient.cancelQueries({ queryKey: INCIDENTS_QUERY_KEY });
     return { previous };
   };
 
@@ -82,7 +83,7 @@ export function useIncidentActions(): IncidentActions {
   });
 
   const resolve = useMutation<ActionResponse, Error, ResolveVars, OptimisticCtx>({
-    mutationFn: ({ id, note }) => resolveIncident(id, note ?? ""),
+    mutationFn: ({ id, note }) => resolveIncident(id, note),
     onMutate: ({ id }) => optimistic(id, "RESOLVED"),
     onError: (_e, _v, ctx) => rollback(ctx),
     onSettled: settle,

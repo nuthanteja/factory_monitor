@@ -60,22 +60,46 @@ make test
 | `frontend/` | React + Vite dashboard |
 | `shared/contracts/` | cross-language fixtures + JSON schema |
 
-## Delivery semantics & known tradeoffs
+## Delivery semantics
 
-The escalation engine is **exactly-once**: a `(incident_id, tier)` idempotency
-row is inserted `ON CONFLICT DO NOTHING` inside the same transaction that writes
-the audit event, outbox row, and updated incident state.  A durable
-`next_fire_at` timestamp in Postgres drives the retry timer, so in-flight state
-survives worker restarts and there is no in-memory timer to lose.
+Escalation **tier fires** are exactly-once *in effect*: the durable `next_fire_at`
+timer is claimed by N workers via `FOR UPDATE SKIP LOCKED` + a `claimed_until`
+lease, and a `UNIQUE escalation_idempotency(incident_id, tier)` insert (ON CONFLICT
+DO NOTHING) in the firing transaction collapses any re-fire after a crash into a
+no-op. A killed worker's claim simply expires and a survivor re-claims the still-due
+row — recovery needs no special on-boot path.
 
-Notification **delivery is at-least-once**: the notifier relay sends via the
-provider chain *before* committing the `SENT` status.  A crash after the
-provider network call but before commit (or two concurrent relay replicas racing
-on the same outbox row) can produce a duplicate provider send.  This is
-mitigated by passing an `idempotency_key` to every provider and by a
-`FOR UPDATE` re-lock on the `messages` read-model row that guards inbound-reply
-matching.  Exactly-once *send* (a two-phase `SENDING` claim before the network
-call) is a documented **Phase-3** item.
+Notification **sends** are exactly-once *in effect* via a **two-phase SENDING
+claim**: the relay atomically flips a due `outbox` row `PENDING → SENDING` (with its
+own lease) and commits before calling the provider, then settles `SENDING → SENT`
+after. A crash between the send and the settle leaves a recoverable `SENDING` row
+that is reclaimed once its lease expires and re-sent — and the provider's
+`Idempotency-Key` (Twilio) / an idempotent receiver collapses the re-send into one
+delivered message. The send *invocation* is therefore at-least-once (a crash can
+cause a second call), but the delivered *effect* is exactly-once. True exactly-once
+*invocation* across a crash is impossible without provider cooperation (two-generals),
+so this is the honest, correct guarantee.
+
+## Reliability / chaos
+
+Deterministic chaos tests prove both guarantees under killed workers — run them with:
+
+```bash
+make chaos          # or, on Windows: ./.venv/Scripts/python.exe -m pytest -m chaos -v
+```
+
+- **Escalation** (`cloud/tests/chaos/test_escalation_exactly_once.py`): 3 workers race
+  one due incident; one is killed while holding a claim mid-transition. The survivors
+  drive it to `CRITICAL_UNRESOLVED`; the test asserts **0 duplicate** (each tier event
+  exactly once, `escalation_idempotency` count == fired tiers) and **0 miss**.
+- **Notifier** (`cloud/tests/chaos/test_notifier_exactly_once.py`): a worker is killed
+  between the provider send and the settle commit; the row is reclaimed and re-sent,
+  and the test asserts exactly one delivered effect (one `messages` row) despite the
+  second send invocation.
+
+> Deferred (documented, not built in 3a): a `docker kill`-based demo against the
+> compose stack and a pumba randomized-kill soak. The deterministic pytest proofs
+> above are the CI-gated source of truth.
 
 ## Live updates (WebSocket)
 

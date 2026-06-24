@@ -126,17 +126,37 @@ async def test_escalation_exactly_once_under_worker_kill(maker: async_sessionmak
     vt = asyncio.create_task(victim.run_until_stopped())
     await asyncio.wait_for(claimed.wait(), timeout=10)
 
-    # Now bring up the survivors and KILL the victim mid-transition.
+    # KILL the victim while it holds the claim mid-transition — BEFORE any survivor runs.
+    vt.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await vt
+
+    # Intermediate proof (race-free — no survivor is running yet): the kill rolled the
+    # victim's flushed-but-uncommitted transition back, so there is NO idempotency row and
+    # NO tier advance; yet the committed claim survives, so recovery must come via the lease
+    # expiring (not an eager release).
+    async with maker() as s:
+        idemp_after_kill = (
+            await s.execute(
+                select(EscalationIdempotency).where(
+                    EscalationIdempotency.incident_id == inc.id
+                )
+            )
+        ).scalars().all()
+        held = await s.get(Incident, inc.id)
+    assert idemp_after_kill == [], "killed worker's transition must roll back (no idemp row)"
+    assert held.status == IncidentStatus.AWAITING_OPERATOR, (
+        "no tier advance from the killed worker"
+    )
+    assert held.claimed_by == "victim", "claim must persist (lease path, not eager release)"
+
+    # Now bring up the survivors; they reclaim once the lease expires and finish the thread.
     await surv1.start()
     await surv2.start()
     t1 = asyncio.create_task(surv1.run_until_stopped())
     t2 = asyncio.create_task(surv2.run_until_stopped())
 
     try:
-        vt.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await vt
-
         # Survivors must reclaim (after the lease) and drive to CRITICAL_UNRESOLVED.
         async def wait_for_critical() -> None:
             while True:

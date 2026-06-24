@@ -181,3 +181,67 @@ async def test_graceful_stop_via_stop_event(maker):
     stop.set()
     await asyncio.wait_for(task, timeout=2.0)
     # No exception raised — graceful exit confirmed.
+
+
+@pytest.mark.asyncio
+async def test_db_error_is_isolated_and_loop_continues(maker):
+    """A transient DB error in one poll does not crash the loop.
+
+    Poll 1 raises an exception (simulated DB error).
+    Poll 2 succeeds and broadcasts a changed incident.
+    The loop must not propagate the exception from poll 1, and the broadcast
+    from poll 2 must still reach the manager.
+    """
+    poll_calls: list[int] = []
+    inserted_incident: list[Incident] = []
+
+    # Wrap poll_changes_once:
+    #   call 1 — raises a simulated DB error (tests error isolation)
+    #   call 2 — inserts a fresh incident THEN delegates to the real impl so
+    #             the new row's updated_at is guaranteed > the current watermark
+    import cloud.common.ws.fallback as fallback_module
+
+    original_poll = fallback_module.poll_changes_once
+
+    async def _flaky_poll(sm, mgr, *, since, batch):  # noqa: ANN001
+        poll_calls.append(1)
+        if len(poll_calls) == 1:
+            raise RuntimeError("simulated transient DB error")
+        # Insert after the fallback's watermark is established so updated_at > since.
+        inc = await _insert(sm, f"k|{uuid.uuid4().hex}|PPE|b")
+        inserted_incident.append(inc)
+        return await original_poll(sm, mgr, since=since, batch=batch)
+
+    mgr = FakeManager()
+    stop = asyncio.Event()
+    fallback = PostgresPollFallback(maker, mgr, poll_seconds=0.05, batch=200)
+
+    monkeypatch_applied = False
+    try:
+        fallback_module.poll_changes_once = _flaky_poll  # type: ignore[assignment]
+        monkeypatch_applied = True
+
+        async def _run_two_polls():
+            # Stop after two poll attempts have been recorded.
+            while len(poll_calls) < 2:  # noqa: ASYNC110
+                await asyncio.sleep(0.01)
+            # Give the second poll time to finish broadcasting before stopping.
+            await asyncio.sleep(0.05)
+            stop.set()
+
+        await asyncio.gather(
+            fallback.run(stop_event=stop),
+            _run_two_polls(),
+        )
+    finally:
+        if monkeypatch_applied:
+            fallback_module.poll_changes_once = original_poll  # type: ignore[assignment]
+
+    # The loop survived poll 1's error and continued to poll 2.
+    assert len(poll_calls) >= 2, "loop must have attempted at least two polls"
+    assert len(inserted_incident) == 1, "second poll must have run the real impl"
+
+    # The second (successful) poll must have broadcast the incident.
+    broadcast_ids = {data["incident_id"] for (_type, data) in mgr.calls}
+    assert str(inserted_incident[0].id) in broadcast_ids, "second poll's change must be broadcast"
+    assert all(ws_type is WsType.INCIDENT_UPDATED for (ws_type, _) in mgr.calls)

@@ -77,22 +77,3 @@ class RedisFanoutSubscriber:
             self.subscribed = False
             await pubsub.unsubscribe(self._channel)
             await pubsub.aclose()
-
-
-async def run_subscriber(
-    redis_client: object,
-    channel: str,
-    manager: object,
-    session_maker: async_sessionmaker,
-    *,
-    stop_event: asyncio.Event | None = None,
-) -> None:
-    """Convenience coroutine wrapping RedisFanoutSubscriber.run().
-
-    Matches the functional signature requested by the task spec:
-        run_subscriber(redis_client, channel, manager, session_maker, *, stop_event)
-    """
-    sub = RedisFanoutSubscriber(
-        redis_client, session_maker, manager, channel=channel
-    )
-    await sub.run(stop_event=stop_event)

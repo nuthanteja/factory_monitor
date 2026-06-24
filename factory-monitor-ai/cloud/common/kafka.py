@@ -5,6 +5,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from cloud.common.config import get_settings
 from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.common.telemetry import inject_trace_headers
 
 
 def serialize_event(event: AnomalyEvent) -> bytes:
@@ -52,9 +53,11 @@ async def make_consumer(
 async def publish_event(
     producer: AIOKafkaProducer, topic: str, event: AnomalyEvent
 ) -> None:
-    """Produce the event keyed by camera_id (partition affinity per camera)."""
+    """Produce the event keyed by camera_id, carrying the active W3C trace context
+    in the record headers so the trace spans edge → cloud across Kafka."""
     await producer.send_and_wait(
         topic,
         key=event.camera_id.encode("utf-8"),
         value=serialize_event(event),
+        headers=inject_trace_headers(),
     )

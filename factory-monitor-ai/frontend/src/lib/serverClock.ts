@@ -65,9 +65,10 @@ export function tierLabelFromIncident(
 
 /**
  * Adapt the REST `Incident` (resync / fallback channel) into the unified
- * `IncidentView` the live store holds. The REST list has no per-tier
- * `deadline_at`, no `object_class`, and no server `tier_label`, so those are
- * filled in locally; a subsequent WS frame overwrites them authoritatively.
+ * `IncidentView` the live store holds. Since Task 5 the REST IncidentOut
+ * includes `object_class`, `deadline_at`, and `tier_label`; these are passed
+ * through directly (server is authoritative). `tierLabelFromIncident` is kept
+ * as a local fallback in case `tier_label` is absent on an older API version.
  */
 export function incidentToView(i: Incident): IncidentView {
   return {
@@ -77,12 +78,12 @@ export function incidentToView(i: Incident): IncidentView {
     rule_id: i.rule_id,
     anomaly_type: i.anomaly_type,
     severity: i.severity,
-    object_class: null,
+    object_class: i.object_class,
     status: i.status,
     current_tier: i.current_tier,
-    deadline_at: null,
+    deadline_at: i.deadline_at ?? null,
     opened_at: i.created_at,
     snapshot_url: i.snapshot_url,
-    tier_label: tierLabelFromIncident(i.current_tier, i.status),
+    tier_label: (i.tier_label || tierLabelFromIncident(i.current_tier, i.status)) as TierLabel,
   };
 }

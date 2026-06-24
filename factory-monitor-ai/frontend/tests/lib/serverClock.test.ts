@@ -60,19 +60,41 @@ describe("incidentToView", () => {
     anomaly_type: "ppe_no_hardhat",
     rule_id: "PPE_NO_HARDHAT",
     severity: "high",
+    object_class: "person",
     status: "TIER1",
     current_tier: 1,
+    deadline_at: "2026-06-22T10:20:03.412Z",
+    tier_label: "Floor Manager",
     created_at: "2026-06-22T10:15:03.412Z",
     snapshot_url: null,
   };
 
-  it("adapts REST Incident -> IncidentView (id->incident_id, derives tier_label)", () => {
+  it("adapts REST Incident -> IncidentView (id->incident_id, created_at->opened_at)", () => {
     const v = incidentToView(rest);
     expect(v.incident_id).toBe(rest.id);
     expect(v.opened_at).toBe(rest.created_at);
+  });
+
+  it("passes through server tier_label (authoritative, not locally derived)", () => {
+    const v = incidentToView(rest);
     expect(v.tier_label).toBe("Floor Manager");
-    expect(v.object_class).toBeNull();
-    expect(v.deadline_at).toBeNull(); // REST list has no per-tier deadline
+  });
+
+  it("passes through object_class from REST response", () => {
+    const v = incidentToView(rest);
+    expect(v.object_class).toBe("person");
+  });
+
+  it("passes through deadline_at from REST response (fixes resync countdown)", () => {
+    const v = incidentToView(rest);
+    expect(v.deadline_at).toBe("2026-06-22T10:20:03.412Z");
+  });
+
+  it("falls back to local tier_label derivation when server field is absent", () => {
+    const noLabel: Incident = { ...rest, tier_label: "" };
+    const v = incidentToView(noLabel);
+    // empty string is falsy -> falls back to tierLabelFromIncident(1, "TIER1") = "Floor Manager"
+    expect(v.tier_label).toBe("Floor Manager");
   });
 });
 

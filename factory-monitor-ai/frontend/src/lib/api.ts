@@ -7,8 +7,11 @@ export interface Incident {
   anomaly_type: string;
   rule_id: string;
   severity: Severity;
+  object_class: string | null;
   status: string;
   current_tier: number;
+  deadline_at: string | null;
+  tier_label: string;
   created_at: string;
   snapshot_url: string | null;
 }

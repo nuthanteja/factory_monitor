@@ -7,7 +7,6 @@ calls; it is resilient to a dead socket (drops it, keeps fanning out).
 
 from __future__ import annotations
 
-import asyncio
 from typing import Protocol
 
 from cloud.common.ws.contract import WsType, make_envelope
@@ -36,7 +35,7 @@ class Connection:
 class ConnectionManager:
     def __init__(self) -> None:
         self._conns: set[Connection] = set()
-        self._lock = asyncio.Lock()
+        # single-threaded asyncio: set mutations are atomic w.r.t. the event loop, no lock needed
 
     @property
     def connection_count(self) -> int:
@@ -45,8 +44,7 @@ class ConnectionManager:
     async def connect(self, ws: _SendableWS) -> Connection:
         await ws.accept()
         conn = Connection(ws)
-        async with self._lock:
-            self._conns.add(conn)
+        self._conns.add(conn)
         return conn
 
     def disconnect(self, conn: Connection) -> None:
@@ -59,15 +57,24 @@ class ConnectionManager:
         conn.client_last_seq = last_seq
 
     async def send(self, conn: Connection, type: WsType, data: dict) -> None:
+        """Send a message to a single connection.
+
+        Caller is responsible for catching exceptions and disconnecting on failure
+        (unlike broadcast, which auto-drops failed connections).
+        """
         env = make_envelope(type, seq=conn.next_seq(), data=data)
         await conn.ws.send_json(env)
 
     async def broadcast(self, type: WsType, data: dict) -> int:
+        """Fan-out a message to all connected clients.
+
+        Returns count of successful sends. Drops any connection that fails framing or send.
+        """
         sent = 0
         dead: list[Connection] = []
         for conn in list(self._conns):
-            env = make_envelope(type, seq=conn.next_seq(), data=data)
             try:
+                env = make_envelope(type, seq=conn.next_seq(), data=data)
                 await conn.ws.send_json(env)
                 sent += 1
             except Exception:

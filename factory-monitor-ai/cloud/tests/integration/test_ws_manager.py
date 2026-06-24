@@ -9,15 +9,18 @@ from cloud.common.ws.manager import ConnectionManager
 class FakeWS:
     """Minimal duck-typed stand-in for starlette WebSocket.send_json."""
 
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, fail_on_send: bool = False) -> None:
         self.sent: list[dict] = []
         self.fail = fail
+        self.fail_on_send = fail_on_send
         self.accepted = False
 
     async def accept(self) -> None:
         self.accepted = True
 
     async def send_json(self, data: dict) -> None:
+        if self.fail_on_send:
+            raise RuntimeError("send_json failed")
         if self.fail:
             raise RuntimeError("socket closed")
         self.sent.append(data)
@@ -82,6 +85,19 @@ async def test_broadcast_drops_failed_connection_and_continues():
     assert n == 1                      # only the good one counted
     assert mgr.connection_count == 1   # bad one was evicted
     assert good.sent[0]["data"] == {"incident_id": "q"}
+
+
+@pytest.mark.asyncio
+async def test_broadcast_drops_failed_send_and_continues():
+    """Ensure send failures (and framing errors) drop only that connection."""
+    mgr = ConnectionManager()
+    good, bad = FakeWS(), FakeWS(fail_on_send=True)
+    await mgr.connect(good)
+    await mgr.connect(bad)
+    n = await mgr.broadcast(WsType.INCIDENT_UPDATED, {"incident_id": "r"})
+    assert n == 1                      # only the good one counted
+    assert mgr.connection_count == 1   # bad one was evicted
+    assert good.sent[0]["data"] == {"incident_id": "r"}
 
 
 @pytest.mark.asyncio

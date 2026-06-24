@@ -13,11 +13,13 @@ import json
 import uuid
 from datetime import datetime
 
-# change_type vocabulary — mirrors the LOCKED §5.5 WsType strings.
-CHANGE_CREATED = "incident.created"
-CHANGE_UPDATED = "incident.updated"
-CHANGE_TIER_ADVANCED = "incident.tier_advanced"
-CHANGE_RESOLVED = "incident.resolved"
+from cloud.common.ws.contract import WsType
+
+# change_type vocabulary — derived from the LOCKED §5.5 WsType contract.
+CHANGE_CREATED = WsType.INCIDENT_CREATED.value
+CHANGE_UPDATED = WsType.INCIDENT_UPDATED.value
+CHANGE_TIER_ADVANCED = WsType.INCIDENT_TIER_ADVANCED.value
+CHANGE_RESOLVED = WsType.INCIDENT_RESOLVED.value
 
 
 def incident_change(

@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from cloud.common.ws.contract import WsType
 from cloud.common.ws_events import (
     CHANGE_CREATED,
     CHANGE_RESOLVED,
@@ -16,10 +17,10 @@ from cloud.common.ws_events import (
 
 
 def test_change_type_constants_match_locked_contract():
-    assert CHANGE_CREATED == "incident.created"
-    assert CHANGE_UPDATED == "incident.updated"
-    assert CHANGE_TIER_ADVANCED == "incident.tier_advanced"
-    assert CHANGE_RESOLVED == "incident.resolved"
+    assert CHANGE_CREATED == WsType.INCIDENT_CREATED.value
+    assert CHANGE_UPDATED == WsType.INCIDENT_UPDATED.value
+    assert CHANGE_TIER_ADVANCED == WsType.INCIDENT_TIER_ADVANCED.value
+    assert CHANGE_RESOLVED == WsType.INCIDENT_RESOLVED.value
 
 
 def test_incident_change_is_compact_and_stringifies_uuid():

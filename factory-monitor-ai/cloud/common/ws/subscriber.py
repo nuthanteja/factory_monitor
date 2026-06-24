@@ -1,9 +1,14 @@
 """Redis pub/sub subscriber — the live (Redis-up) fan-out path (design §3.2).
 
 Subscribes to the WS channel; for each published compact change it calls
-broadcast_change, which re-reads the incident and broadcasts a fresh §5.5
-envelope via the slice-1 ConnectionManager. A malformed payload is logged
-and skipped so one bad message never kills the live feed.
+broadcast_change, which re-reads the incident from Postgres and broadcasts
+a fresh §5.5 envelope via the ConnectionManager.  A malformed payload is
+logged and skipped so one bad message never kills the live feed.
+
+The correct broadcaster is cloud.common.ws.broadcaster.broadcast_change:
+    broadcast_change(session_maker, manager, change) -> int
+which calls manager.broadcast(WsType, data) — the manager owns envelope
+framing and per-connection seq assignment.
 """
 from __future__ import annotations
 
@@ -12,18 +17,20 @@ import logging
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from cloud.api.ws.broadcaster import ConnectionManagerLike, broadcast_change
+from cloud.common.ws.broadcaster import broadcast_change
 from cloud.common.ws_events import decode_change
 
 logger = logging.getLogger(__name__)
 
 
 class RedisFanoutSubscriber:
+    """Subscribes to a Redis pub/sub channel and fans out changes via manager."""
+
     def __init__(
         self,
         redis_client: object,
         session_maker: async_sessionmaker,
-        manager: ConnectionManagerLike,
+        manager: object,  # ConnectionManager (or any object with broadcast(WsType, dict)->int)
         *,
         channel: str,
     ) -> None:
@@ -34,14 +41,15 @@ class RedisFanoutSubscriber:
         self.subscribed = False
 
     async def handle_raw(self, raw: str | bytes) -> bool:
-        """Decode one pubsub payload and broadcast it. Never raises."""
+        """Decode one pubsub payload and broadcast it.  Never raises."""
         try:
             change = decode_change(raw)
         except Exception:  # noqa: BLE001 — bad payload must not kill the loop
             logger.warning("ws subscriber dropped malformed payload", exc_info=True)
             return False
         try:
-            return await broadcast_change(self._session_maker, self._manager, change)
+            sent = await broadcast_change(self._session_maker, self._manager, change)
+            return sent > 0
         except Exception:  # noqa: BLE001 — a broadcast error must not kill the loop
             logger.exception("ws subscriber broadcast failed change=%s", change)
             return False
@@ -62,10 +70,29 @@ class RedisFanoutSubscriber:
                 if message.get("type") != "message":
                     continue
                 await self.handle_raw(message["data"])
-        except asyncio.CancelledError:  # pragma: no cover - shutdown path
+        except asyncio.CancelledError:
             logger.info("ws redis subscriber cancelled")
             raise
         finally:
             self.subscribed = False
             await pubsub.unsubscribe(self._channel)
             await pubsub.aclose()
+
+
+async def run_subscriber(
+    redis_client: object,
+    channel: str,
+    manager: object,
+    session_maker: async_sessionmaker,
+    *,
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    """Convenience coroutine wrapping RedisFanoutSubscriber.run().
+
+    Matches the functional signature requested by the task spec:
+        run_subscriber(redis_client, channel, manager, session_maker, *, stop_event)
+    """
+    sub = RedisFanoutSubscriber(
+        redis_client, session_maker, manager, channel=channel
+    )
+    await sub.run(stop_event=stop_event)

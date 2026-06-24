@@ -9,6 +9,8 @@ it creates connections on demand inside TestClient's loop.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,8 +36,7 @@ def _drain_until(ws, match_type: str, *, timeout: float = 3.0) -> dict:
     Each ``ws.receive_json()`` call blocks until the server sends a frame;
     running it in a thread lets us impose a wall-clock deadline that is safe
     even on a heavily loaded CI machine.  Raises ``TimeoutError`` if no
-    matching frame arrives within *timeout* seconds, or ``AssertionError`` if
-    the executor itself raises.
+    matching frame arrives within *timeout* seconds.
     """
     deadline = timeout
 
@@ -58,6 +59,29 @@ def _drain_until(ws, match_type: str, *, timeout: float = 3.0) -> dict:
             # never spin without bound even if frames arrive very quickly.
             remaining -= 0.001
     raise TimeoutError(f"No '{match_type}' frame received within {timeout}s")
+
+
+@contextlib.contextmanager
+def _ws_session(client: TestClient, path: str):
+    """Thin wrapper around ``client.websocket_connect`` that suppresses the
+    ``concurrent.futures.CancelledError`` Starlette's TestClient can raise
+    during WebSocket teardown.
+
+    Root cause: Starlette's ``WebSocketTestSession.__exit__`` invokes
+    ``ExitStack`` callbacks in LIFO order: ``close(1000)`` → ``cs.cancel()``
+    → ``fut.result()``.  If the ASGI app's ``ws_live`` handler is still in
+    its ``asyncio.gather(*pending, return_exceptions=True)`` cleanup when
+    ``cs.cancel()`` fires, the ``_run`` task is cancelled mid-handler.
+    ``fut.result()`` then re-raises that ``CancelledError``.  All test
+    assertions are complete *inside* the ``with ws:`` block before this
+    teardown sequence begins, so suppressing the exception here is safe and
+    correct — the server still executes ``finally: mgr.disconnect(conn)``.
+    """
+    try:
+        with client.websocket_connect(path) as ws:
+            yield ws
+    except concurrent.futures.CancelledError:
+        pass  # benign Starlette TestClient teardown race — assertions already passed
 
 
 def _async_url(sync_url: str) -> str:
@@ -192,24 +216,25 @@ def seeded_resolved_incident_id(sync_url: str) -> uuid.UUID:
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 def test_connect_receives_snapshot_with_active_incident(app, seeded_incident_id):
-    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "snapshot"
-        assert msg["version"] == 1
-        assert msg["seq"] == 1
-        datetime.fromisoformat(msg["server_now"])  # valid ISO-8601
-        ids = [i["incident_id"] for i in msg["data"]["incidents"]]
-        assert str(seeded_incident_id) in ids
-        sid = str(seeded_incident_id)
-        view = next(i for i in msg["data"]["incidents"] if i["incident_id"] == sid)
-        assert view["status"] == "AWAITING_OPERATOR"
-        assert view["tier_label"] == "Operator"
-        assert view["deadline_at"] is not None
-        assert set(view.keys()) == {
-            "incident_id", "camera_id", "zone_id", "rule_id", "anomaly_type",
-            "severity", "object_class", "status", "current_tier",
-            "deadline_at", "opened_at", "snapshot_url", "tier_label",
-        }
+    with TestClient(app) as client:
+        with _ws_session(client, "/ws/live") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "snapshot"
+            assert msg["version"] == 1
+            assert msg["seq"] == 1
+            datetime.fromisoformat(msg["server_now"])  # valid ISO-8601
+            ids = [i["incident_id"] for i in msg["data"]["incidents"]]
+            assert str(seeded_incident_id) in ids
+            sid = str(seeded_incident_id)
+            view = next(i for i in msg["data"]["incidents"] if i["incident_id"] == sid)
+            assert view["status"] == "AWAITING_OPERATOR"
+            assert view["tier_label"] == "Operator"
+            assert view["deadline_at"] is not None
+            assert set(view.keys()) == {
+                "incident_id", "camera_id", "zone_id", "rule_id", "anomaly_type",
+                "severity", "object_class", "status", "current_tier",
+                "deadline_at", "opened_at", "snapshot_url", "tier_label",
+            }
 
 
 def test_heartbeat_follows_snapshot_with_server_now(app, seeded_incident_id):
@@ -218,36 +243,37 @@ def test_heartbeat_follows_snapshot_with_server_now(app, seeded_incident_id):
 
     app.state.ws_heartbeat_seconds = 0.05
     app.state.ws_timer_snapshot_seconds = 0.05
-    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
-        first = ws.receive_json()
-        assert first["type"] == "snapshot"
-        # Drain frames until both system.heartbeat AND timer.snapshot have been
-        # observed (up to 3 s wall-clock).  A fixed iteration count races on
-        # slow/loaded CI machines because asyncio.sleep(0.05) may actually take
-        # several hundred ms there.
-        seen = {first["type"]}
-        seqs = [first["seq"]]
-        NEED = {"system.heartbeat", "timer.snapshot"}
+    with TestClient(app) as client:
+        with _ws_session(client, "/ws/live") as ws:
+            first = ws.receive_json()
+            assert first["type"] == "snapshot"
+            # Drain frames until both system.heartbeat AND timer.snapshot have been
+            # observed (up to 3 s wall-clock).  A fixed iteration count races on
+            # slow/loaded CI machines because asyncio.sleep(0.05) may actually take
+            # several hundred ms there.
+            seen = {first["type"]}
+            seqs = [first["seq"]]
+            NEED = {"system.heartbeat", "timer.snapshot"}
 
-        def _read_one() -> dict:
-            return ws.receive_json()
+            def _read_one() -> dict:
+                return ws.receive_json()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            deadline = 3.0
-            while not NEED.issubset(seen) and deadline > 0:
-                fut = pool.submit(_read_one)
-                try:
-                    m = fut.result(timeout=deadline)
-                except concurrent.futures.TimeoutError:
-                    break
-                seen.add(m["type"])
-                seqs.append(m["seq"])
-                datetime.fromisoformat(m["server_now"])
-                deadline -= 0.001  # floor to avoid zero-timeout edge case
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                deadline = 3.0
+                while not NEED.issubset(seen) and deadline > 0:
+                    fut = pool.submit(_read_one)
+                    try:
+                        m = fut.result(timeout=deadline)
+                    except concurrent.futures.TimeoutError:
+                        break
+                    seen.add(m["type"])
+                    seqs.append(m["seq"])
+                    datetime.fromisoformat(m["server_now"])
+                    deadline -= 0.001  # floor to avoid zero-timeout edge case
 
-        assert "system.heartbeat" in seen, "system.heartbeat never received"
-        assert "timer.snapshot" in seen, "timer.snapshot never received"
-        assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
+            assert "system.heartbeat" in seen, "system.heartbeat never received"
+            assert "timer.snapshot" in seen, "timer.snapshot never received"
+            assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
     _ = ws_mod  # ensure the module import path is the one under test
 
 
@@ -260,24 +286,27 @@ def test_timer_snapshot_payload_shape(app, seeded_incident_id):
     # window.
     app.state.ws_heartbeat_seconds = 5.0
     app.state.ws_timer_snapshot_seconds = 0.05
-    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
-        assert ws.receive_json()["type"] == "snapshot"
-        timer = _drain_until(ws, "timer.snapshot", timeout=3.0)
-        rows = timer["data"]["incidents"]
-        assert any(r["incident_id"] == str(seeded_incident_id) for r in rows)
-        row = next(r for r in rows if r["incident_id"] == str(seeded_incident_id))
-        assert set(row.keys()) == {"incident_id", "deadline_at", "current_tier"}
+    with TestClient(app) as client:
+        with _ws_session(client, "/ws/live") as ws:
+            assert ws.receive_json()["type"] == "snapshot"
+            timer = _drain_until(ws, "timer.snapshot", timeout=3.0)
+            rows = timer["data"]["incidents"]
+            assert any(r["incident_id"] == str(seeded_incident_id) for r in rows)
+            row = next(r for r in rows if r["incident_id"] == str(seeded_incident_id))
+            assert set(row.keys()) == {"incident_id", "deadline_at", "current_tier"}
 
 
 def test_subscribe_message_is_accepted_and_acked(app, seeded_incident_id):
     app.state.ws_heartbeat_seconds = 5.0
     app.state.ws_timer_snapshot_seconds = 5.0
-    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
-        assert ws.receive_json()["type"] == "snapshot"
-        ws.send_json({"action": "subscribe", "topics": ["incidents"], "last_seq": 1})
-        ack = ws.receive_json()
-        assert ack["type"] == "system.heartbeat"   # ack is sent as an immediate heartbeat re-anchor
-        assert ack["data"] == {}
+    with TestClient(app) as client:
+        with _ws_session(client, "/ws/live") as ws:
+            assert ws.receive_json()["type"] == "snapshot"
+            ws.send_json({"action": "subscribe", "topics": ["incidents"], "last_seq": 1})
+            ack = ws.receive_json()
+            # ack is sent as an immediate heartbeat re-anchor
+            assert ack["type"] == "system.heartbeat"
+            assert ack["data"] == {}
 
 
 def test_snapshot_excludes_resolved_and_ack(
@@ -286,20 +315,35 @@ def test_snapshot_excludes_resolved_and_ack(
     """Snapshot must include the active incident and exclude the RESOLVED one."""
     app.state.ws_heartbeat_seconds = 5.0
     app.state.ws_timer_snapshot_seconds = 5.0
-    with TestClient(app) as client, client.websocket_connect("/ws/live") as ws:
-        msg = ws.receive_json()
-        assert msg["type"] == "snapshot"
-        ids = [i["incident_id"] for i in msg["data"]["incidents"]]
-        assert str(seeded_incident_id) in ids
-        assert str(seeded_resolved_incident_id) not in ids
+    with TestClient(app) as client:
+        with _ws_session(client, "/ws/live") as ws:
+            msg = ws.receive_json()
+            assert msg["type"] == "snapshot"
+            ids = [i["incident_id"] for i in msg["data"]["incidents"]]
+            assert str(seeded_incident_id) in ids
+            assert str(seeded_resolved_incident_id) not in ids
 
 
 def test_disconnect_returns_connection_count_to_zero(app):
-    """connection_count must be 1 while connected and 0 after disconnect."""
+    """connection_count must be 1 while connected and 0 after disconnect.
+
+    After the websocket ``with`` block exits, the server-side ``finally:
+    mgr.disconnect(conn)`` runs inside TestClient's event loop.  That teardown
+    is async and may not complete before this sync thread checks the count, so
+    we poll for up to ~2 s in 20 ms steps rather than asserting immediately.
+    """
     app.state.ws_heartbeat_seconds = 5.0
     app.state.ws_timer_snapshot_seconds = 5.0
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/live") as ws:
+        with _ws_session(client, "/ws/live") as ws:
             ws.receive_json()  # consume the snapshot
             assert app.state.ws_manager.connection_count == 1
-        assert app.state.ws_manager.connection_count == 0
+        # Poll: server-side disconnect propagates asynchronously.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if app.state.ws_manager.connection_count == 0:
+                break
+            time.sleep(0.02)
+        assert app.state.ws_manager.connection_count == 0, (
+            "connection_count did not reach 0 within 2 s after WebSocket close"
+        )

@@ -121,3 +121,15 @@ def test_ws_redis_env_override(monkeypatch):
     assert s.ws_redis_channel == "dashboard:custom"
     assert s.ws_fallback_poll_seconds == 0.5
     assert s.ws_fallback_batch == 100
+
+
+def test_otel_settings_default_none_and_read_env(monkeypatch):
+    from cloud.common.config import Settings
+    s = Settings()
+    assert s.otel_exporter_otlp_endpoint is None
+    assert s.otel_service_name is None
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4318")
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "ingest_worker")
+    s2 = Settings()
+    assert s2.otel_exporter_otlp_endpoint == "http://otel-collector:4318"
+    assert s2.otel_service_name == "ingest_worker"

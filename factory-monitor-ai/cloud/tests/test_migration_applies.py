@@ -60,3 +60,37 @@ def test_downgrade_then_upgrade_roundtrip(pg_url):
     assert "incidents" not in set(insp.get_table_names())
     engine.dispose()
     command.upgrade(cfg, "head")
+
+
+def test_outbox_two_phase_columns_and_enum_exist(pg_url):
+    """Migration 0002 adds SENDING to outbox_status + claimed_by/claimed_until + reclaim index."""
+    cfg = _alembic_config(pg_url)
+    command.upgrade(cfg, "head")
+
+    engine = sa.create_engine(pg_url)
+    with engine.connect() as conn:
+        enum_vals = set(
+            conn.execute(
+                sa.text(
+                    "SELECT e.enumlabel FROM pg_enum e "
+                    "JOIN pg_type t ON e.enumtypid = t.oid "
+                    "WHERE t.typname = 'outbox_status'"
+                )
+            ).scalars()
+        )
+        assert "SENDING" in enum_vals
+
+        cols = set(
+            conn.execute(
+                sa.text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'outbox'"
+                )
+            ).scalars()
+        )
+        assert {"claimed_by", "claimed_until"} <= cols
+
+    insp = sa.inspect(engine)
+    idx = {ix["name"] for ix in insp.get_indexes("outbox")}
+    assert "idx_outbox_sending_reclaim" in idx
+    engine.dispose()

@@ -179,6 +179,8 @@ class Outbox(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     provider_sid: Mapped[str | None] = mapped_column(Text)
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

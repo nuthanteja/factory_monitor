@@ -38,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # One process-wide WS hub; slice ws-redis reaches it via app.state.ws_manager.
     app.state.ws_manager = ConnectionManager()
+    app.state.settings = _settings
 
     if settings is not None:
         maker = session_factory(settings)

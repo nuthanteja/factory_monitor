@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from cloud.common.db.models import Incident, IncidentStatus
 from cloud.common.ws.contract import IncidentView, WsType, make_envelope
+from cloud.common.ws.incident_view import build_incident_view, tier_label_for
 
 
 def test_wstype_phase2b_subset_values():
@@ -117,3 +119,42 @@ def test_incident_view_model_dump_always_iso_z():
         snapshot_url=None, tier_label="CRITICAL",
     )
     assert iv_terminal.model_dump()["deadline_at"] is None
+
+
+def test_tier_label_mapping():
+    assert tier_label_for("AWAITING_OPERATOR", 0) == "Operator"
+    assert tier_label_for("TIER1", 1) == "Floor Manager"
+    assert tier_label_for("TIER2", 2) == "Plant Director"
+    # terminal status wins regardless of tier int
+    assert tier_label_for("CRITICAL_UNRESOLVED", 3) == "CRITICAL"
+    # ACK/RESOLVED keep the label of their current tier
+    assert tier_label_for("ACK", 1) == "Floor Manager"
+
+
+def test_build_incident_view_from_orm_row():
+    inc = Incident(
+        id=__import__("uuid").UUID("22222222-2222-4222-8222-222222222222"),
+        site_id="plant-01",
+        camera_id="cam_03",
+        zone_id="zone_weld_bay",
+        anomaly_type="ppe_no_hardhat",
+        rule_id="PPE_NO_HARDHAT",
+        object_class="person",
+        severity="high",
+        dedup_key="cam_03|cam_03:1|PPE_NO_HARDHAT|b",
+        status=IncidentStatus.TIER1,
+        current_tier=1,
+        deadline_at=datetime(2026, 6, 23, 10, 7, 0, tzinfo=UTC),
+        created_at=datetime(2026, 6, 23, 10, 5, 0, tzinfo=UTC),
+        snapshot_url="",  # must coerce to None
+    )
+    iv = build_incident_view(inc)
+    assert iv.incident_id == "22222222-2222-4222-8222-222222222222"
+    assert iv.status == "TIER1"
+    assert iv.current_tier == 1
+    assert iv.tier_label == "Floor Manager"
+    assert iv.opened_at == datetime(2026, 6, 23, 10, 5, 0, tzinfo=UTC)
+    assert iv.snapshot_url is None
+    dumped = iv.model_dump(mode="json")
+    assert dumped["deadline_at"] == "2026-06-23T10:07:00Z"
+    assert dumped["object_class"] == "person"

@@ -87,4 +87,19 @@ describe("LiveIncidentCard", () => {
     expect(screen.getByTestId("resolve-button")).toBeDisabled();
     expect(screen.getByTestId("countdown")).toHaveAttribute("data-state", "terminal");
   });
+
+  it("disables both buttons when busy (double-submit guard during mutation)", () => {
+    const c = clockAt("2026-06-22T10:29:50.000Z");
+    render(
+      <LiveIncidentCard
+        incident={view()}
+        clock={c}
+        onAcknowledge={() => {}}
+        onResolve={() => {}}
+        busy={true}
+      />,
+    );
+    expect(screen.getByTestId("ack-button")).toBeDisabled();
+    expect(screen.getByTestId("resolve-button")).toBeDisabled();
+  });
 });

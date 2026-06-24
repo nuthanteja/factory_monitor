@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
 from cloud.common.on_call_resolver import resolve as _resolve_on_call
+from cloud.common.redis_client import get_redis
 from cloud.common.schemas.anomaly import AnomalyEvent
+from cloud.common.ws_events import CHANGE_CREATED, incident_change
+from cloud.common.ws_publisher import publish_incident_event
 from cloud.ingest_worker.service import OnCallResolverFn, create_incident_from_anomaly
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ async def handle_message(
     dlq_topic: str,
     grace_seconds: int,
     on_call_resolver: OnCallResolverFn | None = None,
+    redis_publisher: object | None = None,
 ) -> str:
     """Validate one record, route malformed to DLQ, else create an incident.
 
@@ -54,6 +58,13 @@ async def handle_message(
             await session.commit()
         else:
             await session.rollback()
+
+    # Best-effort live fan-out AFTER DB commit (design §3.2 commit order).
+    if result.created and result.incident_id is not None and redis_publisher is not None:
+        try:
+            await redis_publisher(incident_change(CHANGE_CREATED, result.incident_id))
+        except Exception:  # noqa: BLE001 — never block ingest on fan-out
+            logger.warning("ingest live publish failed", exc_info=True)
     return result.reason
 
 
@@ -63,6 +74,7 @@ class IngestConsumer:
         self._session_maker = session_factory(settings)
         self._consumer: AIOKafkaConsumer | None = None
         self._producer: AIOKafkaProducer | None = None
+        self._redis: object | None = None
         self._running = False
 
     async def start(self) -> None:
@@ -78,6 +90,7 @@ class IngestConsumer:
         )
         await self._consumer.start()
         await self._producer.start()
+        self._redis = get_redis(self._settings)
         self._running = True
         logger.info(
             "ingest consumer started topic=%s group=%s",
@@ -107,6 +120,9 @@ class IngestConsumer:
                         dlq_topic=self._settings.kafka_dlq_topic,
                         grace_seconds=self._settings.operator_grace_seconds,
                         on_call_resolver=_resolve_on_call,
+                        redis_publisher=lambda ch: publish_incident_event(
+                            self._redis, self._settings.ws_redis_channel, ch
+                        ),
                     )
                     # COMMIT-ORDER CONTRACT: DB transaction committed by handle_message
                     # BEFORE we commit the Kafka offset here.

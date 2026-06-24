@@ -7,6 +7,8 @@ import signal
 
 from cloud.common.config import get_settings
 from cloud.common.db.session import session_factory
+from cloud.common.redis_client import get_redis
+from cloud.common.ws_publisher import publish_incident_event
 from cloud.escalation_worker.worker import EscalationWorker
 
 logging.basicConfig(
@@ -20,11 +22,15 @@ async def main() -> None:
     settings = get_settings()
     maker = session_factory(settings)
 
+    redis_client = get_redis(settings)
     worker = EscalationWorker(
         session_maker=maker,
         poll_interval_seconds=1.0,
         lease_seconds=settings.escalation_lease_seconds,
         batch=10,
+        publisher=lambda ch: publish_incident_event(
+            redis_client, settings.ws_redis_channel, ch
+        ),
     )
 
     loop = asyncio.get_running_loop()

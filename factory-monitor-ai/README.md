@@ -77,6 +77,39 @@ mitigated by passing an `idempotency_key` to every provider and by a
 matching.  Exactly-once *send* (a two-phase `SENDING` claim before the network
 call) is a documented **Phase-3** item.
 
+## Live updates (WebSocket)
+
+The dashboard receives incident state and countdown deadlines over a single
+multiplexed WebSocket at **`/ws/live`**, served in-process by the `api` service
+(no separate process). It replaces the 2s REST poll as the live channel; the
+TanStack-Query 2s poll stays as the **resync + fallback** path.
+
+**Envelope.** Every server→browser frame is versioned and sequenced:
+`{ "type": "<WsType>", "version": 1, "seq": <n>, "server_now": "<ISO8601 UTC>", "data": {...} }`.
+On connect the server sends a `snapshot` (`{ incidents: IncidentView[] }`); thereafter
+`incident.created` / `incident.updated` (full `IncidentView`), `incident.tier_advanced`
+(`{incident_id, current_tier, status, deadline_at}`), `incident.resolved`, a periodic
+`timer.snapshot` re-anchor, and a `system.heartbeat` keepalive. The client subscribes
+with `{action:'subscribe', topics:[...], last_seq}`; on a forward `seq` gap it calls
+`invalidateQueries()` to REST-resync.
+
+**Fan-out (Redis pub/sub primary + Postgres-poll fallback).** Producers (ingest +
+escalation transition) `PUBLISH` to the Redis channel `WS_REDIS_CHANNEL`
+(`dashboard:incidents`) inside/after the state-change transaction. The `api` service
+subscribes on startup (FastAPI lifespan) and translates each message into the WS
+envelope, broadcasting to all connected sockets. Redis is **non-authoritative**: if it
+is down, the API degrades to polling Postgres every `WS_FALLBACK_POLL_SECONDS` for
+changed incidents — no escalation correctness depends on Redis.
+
+**Server-authoritative timers.** All deadline math is Postgres `now()`. The browser
+renders `remaining = deadline_at − (server_now + local_elapsed)` and **never** computes
+escalation; on expiry it shows "OVERDUE — awaiting server" and waits for the next
+`incident.tier_advanced`. The client corrects browser↔server clock skew with an
+EMA-smoothed offset over `performance.now()`, re-anchored on every `server_now`.
+
+Escalation transitions remain **exactly-once** (idempotency row in Postgres); WS
+notification delivery is **at-least-once** (see "Delivery semantics" above).
+
 > **Phase-5 deploy note:** the Twilio inbound-webhook URL is reconstructed from
 > the FastAPI `Request` object.  Behind a reverse proxy this must honour
 > `X-Forwarded-Proto`/`Host` (or a configured public base URL) so the signed

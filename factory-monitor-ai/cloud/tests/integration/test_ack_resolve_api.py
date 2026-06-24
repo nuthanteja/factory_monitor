@@ -15,6 +15,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import Incident, IncidentEvent, IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -52,7 +53,7 @@ async def maker(migrated_url: str):
 
 @pytest_asyncio.fixture
 async def client(maker):
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: maker
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -232,3 +233,84 @@ async def test_resolve_from_ack_state_succeeds(client, maker):
 async def test_resolve_unknown_incident_returns_404(client, maker):
     resp = await client.post(f"/api/v1/incidents/{uuid.uuid4()}/resolve")
     assert resp.status_code == 404
+
+
+# ── publish via app.state.ws_redis ───────────────────────────────────────────
+
+
+class _Recorder:
+    """Fake redis-like publisher that records published change dicts."""
+
+    def __init__(self) -> None:
+        self.changes: list[dict] = []
+
+    async def __call__(self, change: dict) -> None:
+        self.changes.append(change)
+
+
+class _Boom:
+    """Publisher that always raises (tests best-effort swallow)."""
+
+    async def __call__(self, change: dict) -> None:
+        raise ConnectionError("redis down")
+
+
+@pytest_asyncio.fixture
+async def client_with_recorder(maker):
+    """App wired with a recording fake at app.state.ws_redis (no live Redis)."""
+    app = create_app(Settings(ws_fanout_enabled=False))
+    app.dependency_overrides[get_session_maker] = lambda: maker
+    rec = _Recorder()
+    app.state.ws_redis = rec
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c, rec
+
+
+@pytest_asyncio.fixture
+async def client_with_boom(maker):
+    """App wired with an exploding publisher at app.state.ws_redis."""
+    app = create_app(Settings(ws_fanout_enabled=False))
+    app.dependency_overrides[get_session_maker] = lambda: maker
+    app.state.ws_redis = _Boom()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_ack_route_publishes_change_updated_via_app_state(
+    client_with_recorder, maker
+):
+    """When app.state.ws_redis is a recorder, ack route publishes CHANGE_UPDATED."""
+    client, rec = client_with_recorder
+    inc = _seed_incident()
+    async with maker() as s:
+        s.add(inc)
+        await s.commit()
+
+    resp = await client.post(f"/api/v1/incidents/{inc.id}/acknowledge")
+    assert resp.status_code == 200
+
+    assert len(rec.changes) == 1
+    assert rec.changes[0]["change_type"] == "incident.updated"
+    assert rec.changes[0]["incident_id"] == str(inc.id)
+    assert rec.changes[0]["status"] == "ACK"
+
+
+@pytest.mark.asyncio
+async def test_ack_route_booming_publisher_does_not_break_commit(
+    client_with_boom, maker
+):
+    """A booming app.state.ws_redis must not propagate — txn durability holds."""
+    inc = _seed_incident()
+    async with maker() as s:
+        s.add(inc)
+        await s.commit()
+
+    resp = await client_with_boom.post(f"/api/v1/incidents/{inc.id}/acknowledge")
+    assert resp.status_code == 200
+
+    async with maker() as s:
+        row = (await s.execute(select(Incident).where(Incident.id == inc.id))).scalar_one()
+        assert row.status == IncidentStatus.ACK

@@ -14,6 +14,7 @@ from testcontainers.postgres import PostgresContainer
 
 from cloud.api.deps import get_session_maker
 from cloud.api.main import create_app
+from cloud.common.config import Settings
 from cloud.common.db.models import Incident, IncidentStatus
 
 MIGRATIONS = str(Path(__file__).resolve().parents[3] / "cloud" / "migrations")
@@ -52,6 +53,7 @@ async def session_maker(migrated_url: str):
 @pytest_asyncio.fixture
 async def seeded_incident_id(session_maker):
     inc_id = uuid.uuid4()
+    _deadline = datetime.now(tz=UTC) + timedelta(hours=1)
     async with session_maker() as s:
         s.add(
             Incident(
@@ -68,17 +70,18 @@ async def seeded_incident_id(session_maker):
                 status=IncidentStatus.AWAITING_OPERATOR,
                 current_tier=0,
                 next_fire_at=datetime.now(tz=UTC) + timedelta(seconds=120),
+                deadline_at=_deadline,
                 snapshot_url="",
                 is_synthetic=False,
             )
         )
         await s.commit()
-    return inc_id
+    return inc_id, _deadline
 
 
 @pytest_asyncio.fixture
 async def client(session_maker):
-    app = create_app()
+    app = create_app(Settings(ws_fanout_enabled=False))
     app.dependency_overrides[get_session_maker] = lambda: session_maker
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -94,6 +97,7 @@ async def test_healthz(client):
 
 @pytest.mark.asyncio
 async def test_list_incidents_returns_seeded_incident(client, seeded_incident_id):
+    inc_id, expected_deadline = seeded_incident_id
     resp = await client.get("/api/v1/incidents")
     assert resp.status_code == 200
     body = resp.json()
@@ -102,9 +106,10 @@ async def test_list_incidents_returns_seeded_incident(client, seeded_incident_id
     assert "server_now" in body["meta"]
     datetime.fromisoformat(body["meta"]["server_now"])  # must be valid ISO-8601
 
-    match = [i for i in body["incidents"] if i["id"] == str(seeded_incident_id)]
+    match = [i for i in body["incidents"] if i["id"] == str(inc_id)]
     assert len(match) == 1
     inc = match[0]
+    # --- existing fields unchanged (regression guard) ---
     assert inc["camera_id"] == "cam_01"
     assert inc["zone_id"] == "zone_weld_bay"
     assert inc["anomaly_type"] == "ppe_no_hardhat"
@@ -114,7 +119,15 @@ async def test_list_incidents_returns_seeded_incident(client, seeded_incident_id
     assert inc["current_tier"] == 0
     assert "created_at" in inc
     assert inc["snapshot_url"] is None  # empty string "" must be coerced to null
+    # --- new fields ---
+    assert inc["object_class"] == "person"
+    assert inc["tier_label"] == "Operator"  # tier 0 + AWAITING_OPERATOR → "Operator"
+    assert inc["deadline_at"] is not None
+    deadline_parsed = datetime.fromisoformat(inc["deadline_at"].replace("Z", "+00:00"))
+    assert abs((deadline_parsed - expected_deadline).total_seconds()) < 2
+    # --- exact key set (guards against accidental additions/renames) ---
     assert set(inc.keys()) == {
         "id", "camera_id", "zone_id", "anomaly_type", "rule_id",
         "severity", "status", "current_tier", "created_at", "snapshot_url",
+        "object_class", "deadline_at", "tier_label",
     }

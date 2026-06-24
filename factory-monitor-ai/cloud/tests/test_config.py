@@ -73,3 +73,51 @@ def test_escalation_lease_seconds_env_override(monkeypatch):
         ESCALATION_LEASE_SECONDS="77",
     )
     assert s.escalation_lease_seconds == 77
+
+
+def test_ws_fanout_settings_have_defaults_and_env_override(monkeypatch):
+    from cloud.common.config import Settings
+
+    s = Settings()
+    assert s.ws_redis_channel == "dashboard:incidents"
+    assert s.ws_fallback_poll_seconds == 1.0
+    assert s.ws_fallback_batch == 200
+
+    monkeypatch.setenv("WS_REDIS_CHANNEL", "dashboard:incidents:test")
+    monkeypatch.setenv("WS_FALLBACK_POLL_SECONDS", "0.25")
+    monkeypatch.setenv("WS_FALLBACK_BATCH", "50")
+    s2 = Settings()
+    assert s2.ws_redis_channel == "dashboard:incidents:test"
+    assert s2.ws_fallback_poll_seconds == 0.25
+    assert s2.ws_fallback_batch == 50
+
+
+def test_ws_redis_channel_default(monkeypatch):
+    monkeypatch.delenv("WS_REDIS_CHANNEL", raising=False)
+    s = _fresh_settings(
+        monkeypatch,
+        DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
+        ALEMBIC_DATABASE_URL="postgresql://u:p@localhost:5432/db",
+        KAFKA_BOOTSTRAP_SERVERS="localhost:9092",
+        REDIS_URL="redis://localhost:6379/0",
+    )
+    assert s.ws_redis_channel == "dashboard:incidents"
+    assert s.ws_fallback_poll_seconds == 1.0
+    assert s.ws_fallback_batch == 200
+    assert not hasattr(s, "ws_channel"), "stale duplicate ws_channel must not exist"
+
+
+def test_ws_redis_env_override(monkeypatch):
+    s = _fresh_settings(
+        monkeypatch,
+        DATABASE_URL="postgresql+asyncpg://u:p@localhost:5432/db",
+        ALEMBIC_DATABASE_URL="postgresql://u:p@localhost:5432/db",
+        KAFKA_BOOTSTRAP_SERVERS="localhost:9092",
+        REDIS_URL="redis://localhost:6379/0",
+        WS_REDIS_CHANNEL="dashboard:custom",
+        WS_FALLBACK_POLL_SECONDS="0.5",
+        WS_FALLBACK_BATCH="100",
+    )
+    assert s.ws_redis_channel == "dashboard:custom"
+    assert s.ws_fallback_poll_seconds == 0.5
+    assert s.ws_fallback_batch == 100

@@ -75,3 +75,18 @@ jobs:
         run: npm run build
       - name: Run tests (vitest)
         run: npm test
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned to match the version the codebase was cleaned against, so CI and
+      # local agree and a ruff release can't surprise the build with new rules.
+      - name: Install ruff
+        run: pip install ruff==0.15.18
+      - name: Ruff check
+        run: ruff check .

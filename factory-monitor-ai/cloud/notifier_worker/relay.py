@@ -35,7 +35,6 @@ from cloud.notifications.chain import ProviderChain
 from cloud.notifications.provider import NotificationKind
 
 logger = logging.getLogger("factory_monitor.notifier_worker.relay")
-_tracer = _otel_trace.get_tracer("factory_monitor.notifier_worker")
 
 _BATCH = 50
 _BACKOFF_BASE_SECONDS = 10  # backoff = base * 2^(attempts-1), capped at 1h
@@ -118,7 +117,7 @@ async def _settle_row(
 ) -> None:
     kind = NotificationKind(row.kind)
 
-    with _tracer.start_as_current_span(
+    with _otel_trace.get_tracer("factory_monitor.notifier_worker").start_as_current_span(
         "notifier.send",
         attributes={
             "outbox_id": str(row.id),

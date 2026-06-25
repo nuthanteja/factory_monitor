@@ -20,7 +20,6 @@ from cloud.common.ws_publisher import publish_incident_event
 from cloud.ingest_worker.service import OnCallResolverFn, create_incident_from_anomaly
 
 logger = logging.getLogger(__name__)
-_tracer = _otel_trace.get_tracer("factory_monitor.ingest_worker")
 
 
 async def handle_message(
@@ -115,7 +114,7 @@ class IngestConsumer:
                 if not self._running:
                     break
                 parent_ctx = extract_trace_context(msg.headers)
-                with _tracer.start_as_current_span(
+                with _otel_trace.get_tracer("factory_monitor.ingest_worker").start_as_current_span(
                     "ingest.consume",
                     context=parent_ctx,
                     attributes={

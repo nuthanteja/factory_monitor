@@ -24,7 +24,6 @@ from cloud.common.ws_events import CHANGE_TIER_ADVANCED, incident_change
 from cloud.escalation_worker.transition import TransitionResult, fire_transition
 
 logger = logging.getLogger(__name__)
-_tracer = _otel_trace.get_tracer("factory_monitor.escalation_worker")
 
 _ACTIVE_STATUSES = (
     IncidentStatus.AWAITING_OPERATOR.value,
@@ -133,6 +132,7 @@ async def poll_once_ids(
                     or incident.next_fire_at is None
                 ):
                     continue
+                _tracer = _otel_trace.get_tracer("factory_monitor.escalation_worker")
                 with _tracer.start_as_current_span(
                     "escalation.transition",
                     attributes={"incident_id": str(incident_id)},

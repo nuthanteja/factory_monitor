@@ -149,6 +149,9 @@ async def _settle_row(
 
     now = datetime.now(tz=UTC)
 
+    _result_label: str = "other"
+    _failed: bool = False
+
     async with session_maker() as session:
         ob = (
             await session.execute(
@@ -177,7 +180,8 @@ async def _settle_row(
                     status="sent",
                 )
             )
-            notifier_sends_total.labels(channel=result.channel, result="sent").inc()
+            _result_label = "sent"
+            _failed = False
             logger.info(
                 "outbox id=%s SENT via %s sid=%s idem_key=%s",
                 row.id, result.channel, result.sid, str(row.id),
@@ -186,8 +190,8 @@ async def _settle_row(
             ob.status = "DEAD"
             ob.claimed_by = None
             ob.claimed_until = None
-            notifier_sends_total.labels(channel=result.channel, result="dead").inc()
-            provider_send_failures_total.labels(provider=result.channel).inc()
+            _result_label = "dead"
+            _failed = True
             logger.error(
                 "outbox id=%s DEAD after %d attempts — ALERT: delivery failed permanently",
                 row.id, ob.attempts,
@@ -197,8 +201,10 @@ async def _settle_row(
             ob.next_attempt_at = now + _backoff(ob.attempts, backoff_base)
             ob.claimed_by = None
             ob.claimed_until = None
-            notifier_sends_total.labels(channel=result.channel, result=result.status).inc()
-            provider_send_failures_total.labels(provider=result.channel).inc()
+            _result_label = (
+                result.status if result.status in ("degraded", "failed") else "other"
+            )
+            _failed = True
             logger.warning(
                 "outbox id=%s delivery %s (attempt %d/%d); retry at %s",
                 row.id, result.status, ob.attempts, ob.max_attempts,
@@ -206,6 +212,9 @@ async def _settle_row(
             )
 
         await session.commit()
+        notifier_sends_total.labels(channel=result.channel, result=_result_label).inc()
+        if _failed:
+            provider_send_failures_total.labels(provider=result.channel).inc()
 
 
 class NotifierRelay:

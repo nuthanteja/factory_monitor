@@ -20,6 +20,11 @@ export default defineConfig({
         target: "http://otel-collector:4318",
         changeOrigin: true,
       },
+      "/whep": {
+        target: "http://mediamtx:8889",
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/whep/, ""),
+      },
     },
   },
   test: {

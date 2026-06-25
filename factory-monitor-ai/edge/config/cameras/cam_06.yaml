@@ -1,0 +1,12 @@
+camera_id: cam_06
+site_id: plant-01
+rtsp_url: rtsp://mediamtx:8554/cam_06
+zones:
+  - zone_id: zone_weld_bay_06
+    kind: required_ppe
+    # Image-space polygon (pixels), clockwise. Phase 1 = image-space only.
+    polygon:
+      - [200, 120]
+      - [1100, 120]
+      - [1100, 700]
+      - [200, 700]

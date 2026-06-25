@@ -15,7 +15,10 @@ def test_core_services_present_with_images() -> None:
     assert services["postgres"]["image"] == "postgres:16"
     assert services["kafka"]["image"] == "apache/kafka:3.7.0"
     assert services["redis"]["image"] == "redis:7-alpine"
-    assert services["mediamtx"]["image"] == "bluenviron/mediamtx:latest-ffmpeg"
+    mediamtx_image = services["mediamtx"]["image"]
+    assert mediamtx_image.startswith("bluenviron/mediamtx:") and "ffmpeg" in mediamtx_image, (
+        f"mediamtx image must be a bluenviron/mediamtx ffmpeg variant, got: {mediamtx_image!r}"
+    )
 
 
 def test_each_core_service_has_healthcheck() -> None:

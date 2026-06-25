@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import time
 import uuid
@@ -114,6 +115,10 @@ class VisionEngine:
         for i, frame in enumerate(self.frame_source.frames()):
             if max_frames is not None and i >= max_frames:
                 break
+            # Cooperative yield: let other engines and the heartbeat task run
+            # between frames.  Cameras are still serialized during the blocking
+            # cap.read(); true per-camera parallelism (thread/executor) is deferred.
+            await asyncio.sleep(0)
             frames_in_total.labels(camera_id=self.cfg.camera_id).inc()
             cam_last_frame_seconds.labels(camera_id=self.cfg.camera_id).set(time.time())
             _t_detect = time.perf_counter()

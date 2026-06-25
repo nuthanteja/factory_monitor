@@ -10,6 +10,7 @@ def test_init_script_creates_both_topics() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "vision.anomalies.v1" in text
     assert "vision.anomalies.dlq" in text
+    assert "vision.heatmap.v1" in text
 
 
 def test_v1_topic_has_six_partitions_and_24h_retention() -> None:

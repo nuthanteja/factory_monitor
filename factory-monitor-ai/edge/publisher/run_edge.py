@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cloud.common.kafka import make_producer, publish_event
 from cloud.common.schemas.anomaly import AnomalyEvent
+from edge.publisher.heatmap_sink import KafkaHeatmapSink
 from edge.vision.debounce import DebounceConfig, TrackDebouncer
 from edge.vision.detector import Detection, PpeDetector
 from edge.vision.engine import VisionEngine
@@ -102,6 +103,12 @@ async def amain() -> None:
             maxq=200,
         )
 
+    heatmap_sink = (
+        KafkaHeatmapSink(producer, _s.kafka_heatmap_topic)
+        if _s.emit_heatmap
+        else None
+    )
+
     # PER-CAMERA tracker, debouncer, and frame source so that track-id spaces
     # cannot collide across cameras (ByteTrack counters are instance-local).
     # NOTE: asyncio.gather runs engines concurrently.  Each engine yields with
@@ -122,6 +129,9 @@ async def amain() -> None:
             emit_detections=_s.emit_detections,
             detection_sink=_det_sink,
             detection_max_fps=_s.detection_max_fps,
+            emit_heatmap=_s.emit_heatmap,
+            heatmap_sink=heatmap_sink,
+            heatmap_min_interval_s=_s.heatmap_min_interval_s,
         )
         for cfg in cfgs
     ]
@@ -134,6 +144,8 @@ async def amain() -> None:
             await _hb_task
         if _det_sink is not None:
             await _det_sink.close()
+        if heatmap_sink is not None:
+            await heatmap_sink.close()
         await producer.stop()
 
 

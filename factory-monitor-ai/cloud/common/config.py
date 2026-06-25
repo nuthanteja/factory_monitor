@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Detection WebSocket relay (cloud)
     detections_ws_enabled: bool = True     # gate: set False in tests to skip Redis/hub startup
 
+    # Heatmap density emit (Phase 4b)
+    emit_heatmap: bool = False
+    heatmap_min_interval_s: float = 5.0
+    kafka_heatmap_topic: str = "vision.heatmap.v1"
+
     # Escalation timing
     operator_grace_seconds: int = 120
     escalation_lease_seconds: int = 30

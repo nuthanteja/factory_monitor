@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import socket
 from pathlib import Path
@@ -105,6 +106,8 @@ async def amain() -> None:
         await engine.run()
     finally:
         _hb_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _hb_task
         await producer.stop()
 
 

@@ -133,3 +133,14 @@ def test_otel_settings_default_none_and_read_env(monkeypatch):
     s2 = Settings()
     assert s2.otel_exporter_otlp_endpoint == "http://otel-collector:4318"
     assert s2.otel_service_name == "ingest_worker"
+
+
+def test_metrics_port_settings(monkeypatch):
+    from cloud.common.config import Settings
+    s = Settings()
+    assert s.ingest_metrics_port == 9101
+    assert s.escalation_metrics_port == 9102
+    assert s.notifier_metrics_port == 9103
+    assert s.edge_metrics_port == 9108
+    monkeypatch.setenv("ESCALATION_METRICS_PORT", "9999")
+    assert Settings().escalation_metrics_port == 9999

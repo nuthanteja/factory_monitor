@@ -265,3 +265,22 @@ async def test_fault_hook_invoked_with_incident_id_before_commit(maker):
     assert inc.id in fired
     async with maker() as s:
         assert (await s.get(Incident, inc.id)).status == IncidentStatus.TIER1
+
+
+@pytest.mark.asyncio
+async def test_escalation_transition_emits_span(maker):
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from cloud.common.telemetry import reset_telemetry, setup_telemetry
+
+    exporter = InMemorySpanExporter()
+    reset_telemetry()
+    setup_telemetry("esc-test", exporter=exporter)
+
+    inc = await _insert_due_incident(maker, IncidentStatus.AWAITING_OPERATOR, 0)
+    await poll_once(maker, worker_id="span", lease_seconds=30, batch=10)
+
+    spans = [s for s in exporter.get_finished_spans() if s.name == "escalation.transition"]
+    assert spans, "expected an escalation.transition span"
+    assert spans[0].attributes["incident_id"] == str(inc.id)
+    assert spans[0].attributes["tier"] == 1

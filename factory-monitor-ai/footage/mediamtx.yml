@@ -1,5 +1,8 @@
-# MediaMTX config: publish footage/clips/clip_03.mp4 on a loop as RTSP cam_01.
-# Mounted into bluenviron/mediamtx at /mediamtx.yml; clips at /footage/clips.
+# MediaMTX config — RTSP + WebRTC (WHEP) for 6 looping camera streams.
+# Mounted into bluenviron/mediamtx:1.11.3-ffmpeg at /mediamtx.yml;
+# clips directory mounted at /footage/clips.
+# WebRTC key names are valid for MediaMTX 1.11.x (verified against the
+# mediamtx.yml reference shipped in the 1.11.3 release tarball on GitHub).
 logLevel: info
 logDestinations: [stdout]
 
@@ -7,9 +10,28 @@ rtsp: yes
 rtspAddress: :8554
 protocols: [tcp]
 
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: [127.0.0.1, localhost]
+webrtcIPsFromInterfaces: no
+
 paths:
   cam_01:
-    runOnInit: >
-      ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4
-      -c copy -f rtsp rtsp://localhost:8554/cam_01
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_01
+    runOnInitRestart: yes
+  cam_02:
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_02
+    runOnInitRestart: yes
+  cam_03:
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_03
+    runOnInitRestart: yes
+  cam_04:
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_04
+    runOnInitRestart: yes
+  cam_05:
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_05
+    runOnInitRestart: yes
+  cam_06:
+    runOnInit: ffmpeg -re -stream_loop -1 -i /footage/clips/clip_03.mp4 -c copy -f rtsp rtsp://localhost:8554/cam_06
     runOnInitRestart: yes

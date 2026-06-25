@@ -6,10 +6,13 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from opentelemetry import trace as _otel_trace
+
+if TYPE_CHECKING:
+    from edge.publisher.detection_sink import DetectionSink
 
 from cloud.common.metrics import (
     cam_last_frame_seconds,
@@ -95,6 +98,11 @@ class VisionEngine:
         *,
         frame_source: FrameSource,
         clock: Callable[[], datetime] | None = None,
+        # --- detection emit (default-off) ---
+        emit_detections: bool = False,
+        detection_sink: DetectionSink | None = None,
+        detection_max_fps: float = 10.0,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.cfg = cfg
         self.detector = detector
@@ -104,6 +112,13 @@ class VisionEngine:
         self.frame_source = frame_source
         self.clock = clock or (lambda: datetime.now(UTC))
         self.zones = [z for z in cfg.zones if z.kind == "required_ppe"]
+        # detection emit state
+        self.emit_detections = emit_detections
+        self.detection_sink = detection_sink
+        self.detection_max_fps = detection_max_fps
+        self._monotonic = monotonic or time.monotonic
+        self._last_emit_mono: float = 0.0
+        self._det_seq: int = 0
 
     async def _emit(self, key: str, ev: AnomalyEvent) -> None:
         result = self.publish(key, ev)
@@ -124,6 +139,31 @@ class VisionEngine:
             _t_detect = time.perf_counter()
             detections = self.detector.detect(frame)
             tracked = self.tracker.update(detections)
+            # --- per-frame detection emit (default-off, fire-and-forget) ---
+            if self.emit_detections and self.detection_sink is not None:
+                now_mono = self._monotonic()
+                if now_mono - self._last_emit_mono >= 1.0 / self.detection_max_fps:
+                    self._last_emit_mono = now_mono
+                    self._det_seq += 1
+                    h, w = frame.shape[:2]
+                    payload = {
+                        "camera_id": self.cfg.camera_id,
+                        "ts": time.time(),
+                        "frame_w": int(w),
+                        "frame_h": int(h),
+                        "seq": self._det_seq,
+                        "boxes": [
+                            {
+                                "cls": det.object_class,
+                                "bbox": list(det.bbox),
+                                "track_id": raw_id,
+                                "no_hardhat": det.no_hardhat,
+                            }
+                            for raw_id, det in tracked
+                        ],
+                    }
+                    self.detection_sink.publish(self.cfg.camera_id, payload)
+            # -----------------------------------------------------------------
             for raw_id, det in tracked:
                 if det.object_class != "person":
                     continue

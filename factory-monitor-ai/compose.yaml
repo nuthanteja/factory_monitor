@@ -163,10 +163,13 @@ services:
         condition: service_healthy
       mediamtx:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP: kafka:9092
       EDGE_WEIGHTS: /app/edge/models/yolov8n.pt
       PPE_WEIGHTS_URL: ${PPE_WEIGHTS_URL:-}
+      REDIS_URL: "redis://redis:6379/0"
 
   frontend:
     build:

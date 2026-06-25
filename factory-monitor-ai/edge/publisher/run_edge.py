@@ -91,6 +91,17 @@ async def amain() -> None:
     async def publish(key: str, ev: AnomalyEvent) -> None:
         await publish_event(producer, TOPIC, ev)
 
+    # Optional detection overlay sink (default-off).
+    _det_sink = None
+    if _s.emit_detections:
+        from cloud.common.redis_client import get_redis
+        from edge.publisher.detection_sink import RedisDetectionSink
+
+        _det_sink = RedisDetectionSink(
+            get_redis(_s),
+            maxq=200,
+        )
+
     # PER-CAMERA tracker, debouncer, and frame source so that track-id spaces
     # cannot collide across cameras (ByteTrack counters are instance-local).
     # NOTE: asyncio.gather runs engines concurrently.  Each engine yields with
@@ -108,6 +119,9 @@ async def amain() -> None:
             ),
             publish=publish,
             frame_source=RtspFrameSource(cfg.rtsp_url),
+            emit_detections=_s.emit_detections,
+            detection_sink=_det_sink,
+            detection_max_fps=_s.detection_max_fps,
         )
         for cfg in cfgs
     ]
@@ -118,6 +132,8 @@ async def amain() -> None:
         _hb_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _hb_task
+        if _det_sink is not None:
+            await _det_sink.close()
         await producer.stop()
 
 

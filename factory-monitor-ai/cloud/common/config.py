@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Camera/zone seed (Phase 4a)
     seed_cameras_enabled: bool = True      # gate: set False in tests to skip seeding at startup
 
+    # Detection overlay emit (default-off; edge only)
+    emit_detections: bool = False          # gate: set True to stream per-frame boxes to Redis
+    detection_max_fps: float = 10.0        # max publish rate (Hz) for detection overlay
+
     # Escalation timing
     operator_grace_seconds: int = 120
     escalation_lease_seconds: int = 30

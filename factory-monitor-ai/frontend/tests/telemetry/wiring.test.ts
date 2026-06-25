@@ -20,6 +20,9 @@ describe("frontend telemetry wiring", () => {
     const conf = read("nginx.conf");
     expect(conf).toMatch(/location\s*=?\s*\/v1\/traces/);
     expect(conf).toMatch(/resolver\s+127\.0\.0\.11/); // lazy resolution → boots when collector absent
-    expect(conf).toMatch(/otel-collector:4318/);
+    // Assert the functional proxy directives (a variable upstream is what defers
+    // DNS to request-time), not an incidental string in a comment.
+    expect(conf).toMatch(/set\s+\$otel_collector\s+otel-collector;/);
+    expect(conf).toMatch(/proxy_pass\s+http:\/\/\$otel_collector:4318\/v1\/traces;/);
   });
 });

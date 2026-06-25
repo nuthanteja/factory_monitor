@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { IncidentsResponse } from "../../src/lib/api";
+import type { Camera, IncidentsResponse } from "../../src/lib/api";
 
 export const seededIncidents: IncidentsResponse = {
   incidents: [
@@ -37,6 +37,22 @@ export const seededIncidents: IncidentsResponse = {
   meta: { server_now: "2026-06-22T10:16:05.000Z" },
 };
 
+export const seededCameras: Camera[] = [
+  {
+    id: "cam_01",
+    name: "Weld Bay A",
+    whep_url: "/whep/cam_01/whep",
+    zone_id: "zone_weld_bay",
+  },
+  {
+    id: "cam_02",
+    name: "Assembly Line 1",
+    whep_url: "/whep/cam_02/whep",
+    zone_id: null,
+  },
+];
+
 export const handlers = [
   http.get("/api/v1/incidents", () => HttpResponse.json(seededIncidents)),
+  http.get("/api/v1/cameras", () => HttpResponse.json(seededCameras)),
 ];

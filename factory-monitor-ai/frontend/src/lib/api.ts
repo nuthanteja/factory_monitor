@@ -1,5 +1,29 @@
 export type Severity = "low" | "medium" | "high" | "critical";
 
+// ---------------------------------------------------------------------------
+// Cameras
+// ---------------------------------------------------------------------------
+
+export interface Camera {
+  id: string;
+  name: string;
+  whep_url: string;
+  zone_id: string | null;
+}
+
+const CAMERAS_URL = "/api/v1/cameras";
+
+export async function getCameras(signal?: AbortSignal): Promise<Camera[]> {
+  const res = await fetch(CAMERAS_URL, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`getCameras failed: HTTP ${res.status}`);
+  }
+  return (await res.json()) as Camera[];
+}
+
 export interface Incident {
   id: string;
   camera_id: string;

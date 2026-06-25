@@ -16,6 +16,8 @@ async def _amain() -> None:
         settings.otel_service_name or "ingest_worker",
         endpoint=settings.otel_exporter_otlp_endpoint,
     )
+    from cloud.common.metrics import start_metrics_server
+    start_metrics_server(settings.ingest_metrics_port)
     consumer = IngestConsumer(settings)
     await consumer.start()
     try:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.errors import ConsumerStoppedError
@@ -11,6 +12,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
+from cloud.common.metrics import (
+    ingest_event_to_incident_latency_seconds,
+    ingest_events_consumed_total,
+)
 from cloud.common.on_call_resolver import resolve as _resolve_on_call
 from cloud.common.redis_client import get_redis
 from cloud.common.schemas.anomaly import AnomalyEvent
@@ -49,6 +54,7 @@ async def handle_message(
         # commit can produce a duplicate DLQ record.  Acceptable — the DLQ is
         # for human triage and idempotency is not required there.
         await producer.send_and_wait(dlq_topic, value=raw_value, key=raw_key)
+        ingest_events_consumed_total.labels(outcome="dlq").inc()
         return "dlq"
 
     async with session_maker() as session:
@@ -58,6 +64,10 @@ async def handle_message(
         )
         if result.created:
             await session.commit()
+            latency = max(
+                (datetime.now(tz=UTC) - event.occurred_at).total_seconds(), 0.0
+            )
+            ingest_event_to_incident_latency_seconds.observe(latency)
         else:
             await session.rollback()
 
@@ -67,6 +77,7 @@ async def handle_message(
             await redis_publisher(incident_change(CHANGE_CREATED, result.incident_id))
         except Exception:  # noqa: BLE001 — never block ingest on fan-out
             logger.warning("ingest live publish failed", exc_info=True)
+    ingest_events_consumed_total.labels(outcome=result.reason).inc()
     return result.reason
 
 

@@ -1,3 +1,4 @@
+import fnmatch
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,6 +31,21 @@ def test_scrape_jobs_match_real_targets():
     assert api["metrics_path"] == "/metrics"
     am_targets = cfg["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"]
     assert cfg["rule_files"] and am_targets == ["alertmanager:9093"]
+
+
+def test_rule_files_load_alerts_not_the_promtool_test_file() -> None:
+    cfg = yaml.safe_load((_obs() / "prometheus" / "prometheus.yml").read_text())
+    rules_dir = _obs() / "prometheus" / "rules"
+    actual = [p.name for p in rules_dir.iterdir() if p.is_file()]
+    assert "alerts_test.yml" in actual, "fixture guard: alerts_test.yml must exist or test is vacuous"
+    matched: set[str] = set()
+    for entry in cfg["rule_files"]:
+        base = entry.rsplit("/", 1)[-1]
+        matched.update(f for f in actual if fnmatch.fnmatch(f, base))
+    assert "alerts.yml" in matched, "Prometheus must load the real alert rules"
+    assert "alerts_test.yml" not in matched, (
+        "rule_files must not load the promtool test file (Prometheus would exit 1)"
+    )
 
 
 @pytest.mark.integration

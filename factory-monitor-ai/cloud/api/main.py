@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from cloud.api.deps import get_session_maker
 from cloud.api.routes import router
@@ -10,6 +10,7 @@ from cloud.api.twilio_webhook import webhook_router
 from cloud.api.ws import ws_router
 from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
+from cloud.common.metrics import metrics_response
 from cloud.common.redis_client import close_redis, get_redis
 from cloud.common.ws.fanout import start_ws_fanout, stop_ws_fanout
 from cloud.common.ws.manager import ConnectionManager
@@ -47,6 +48,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.include_router(webhook_router)
     app.include_router(ws_router)
+
+    @app.get("/metrics")
+    def _metrics() -> Response:  # noqa: ANN202
+        body, content_type = metrics_response()
+        return Response(content=body, media_type=content_type)
 
     # One process-wide WS hub; slice ws-redis reaches it via app.state.ws_manager.
     app.state.ws_manager = ConnectionManager()

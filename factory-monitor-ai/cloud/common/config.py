@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     emit_detections: bool = False          # gate: set True to stream per-frame boxes to Redis
     detection_max_fps: float = 10.0        # max publish rate (Hz) for detection overlay
 
+    # Detection WebSocket relay (cloud)
+    detections_ws_enabled: bool = True     # gate: set False in tests to skip Redis/hub startup
+
     # Escalation timing
     operator_grace_seconds: int = 120
     escalation_lease_seconds: int = 30

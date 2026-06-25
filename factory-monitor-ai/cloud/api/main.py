@@ -13,6 +13,7 @@ from cloud.common.db.session import session_factory
 from cloud.common.metrics import metrics_response
 from cloud.common.redis_client import close_redis, get_redis
 from cloud.common.seed_cameras import seed_cameras
+from cloud.common.ws.detection_hub import DetectionHub
 from cloud.common.ws.fanout import start_ws_fanout, stop_ws_fanout
 from cloud.common.ws.manager import ConnectionManager
 
@@ -37,6 +38,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if _settings.ws_fanout_enabled:
             app.state.ws_redis = get_redis(_settings)
             await start_ws_fanout(app)
+        if _settings.detections_ws_enabled:
+            # Reuse the same redis client as the fanout (or create one if fanout is off).
+            redis = getattr(app.state, "ws_redis", None) or get_redis(_settings)
+            app.state.detection_hub = DetectionHub(redis)
         if _settings.seed_cameras_enabled:
             maker = getattr(app.state, "ws_session_maker", None)
             if maker is not None:
@@ -44,6 +49,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # --- yield to serve requests ---
         yield
         # --- shutdown ---
+        if _settings.detections_ws_enabled:
+            hub: DetectionHub | None = getattr(app.state, "detection_hub", None)
+            if hub is not None:
+                await hub.close()
         if _settings.ws_fanout_enabled:
             await stop_ws_fanout(app)
             await close_redis()

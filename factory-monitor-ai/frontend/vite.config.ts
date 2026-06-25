@@ -20,6 +20,16 @@ export default defineConfig({
         target: "http://otel-collector:4318",
         changeOrigin: true,
       },
+      "/ws/live": {
+        target: "http://api:8000",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/ws/detections": {
+        target: "http://api:8000",
+        changeOrigin: true,
+        ws: true,
+      },
       "/whep": {
         target: "http://mediamtx:8889",
         changeOrigin: true,

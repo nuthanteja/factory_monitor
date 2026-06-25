@@ -37,7 +37,7 @@ def test_rule_files_load_alerts_not_the_promtool_test_file() -> None:
     cfg = yaml.safe_load((_obs() / "prometheus" / "prometheus.yml").read_text())
     rules_dir = _obs() / "prometheus" / "rules"
     actual = [p.name for p in rules_dir.iterdir() if p.is_file()]
-    assert "alerts_test.yml" in actual, "fixture guard: alerts_test.yml must exist or test is vacuous"
+    assert "alerts_test.yml" in actual, "guard fixture must exist or the test is vacuous"
     matched: set[str] = set()
     for entry in cfg["rule_files"]:
         base = entry.rsplit("/", 1)[-1]

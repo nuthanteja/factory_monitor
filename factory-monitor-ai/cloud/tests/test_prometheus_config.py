@@ -52,6 +52,11 @@ def test_rule_files_load_alerts_not_the_promtool_test_file() -> None:
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker required")
 def test_promtool_check_config():
     obs = _obs()
+    # Mount the rules dir at the absolute path the config references so
+    # `promtool check config` resolves and validates the rule files too — not
+    # just the scrape config. (A glob that also matched the promtool test file
+    # would now surface here as a load error, not silently pass.)
+    rules = obs / "prometheus" / "rules"
     r = subprocess.run(
         [
             "docker",
@@ -61,6 +66,8 @@ def test_promtool_check_config():
             "promtool",
             "-v",
             f"{obs.as_posix()}:/work",
+            "-v",
+            f"{rules.as_posix()}:/etc/prometheus/rules:ro",
             "prom/prometheus:v2.53.0",
             "check",
             "config",

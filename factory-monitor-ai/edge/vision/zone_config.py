@@ -37,3 +37,12 @@ def load_camera_config(path: str | Path) -> CameraConfig:
     with p.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
     return CameraConfig.model_validate(raw)
+
+
+def load_all_camera_configs(dir_path: str | Path) -> list[CameraConfig]:
+    """Discover and load every cam_*.yaml in dir_path, sorted by filename."""
+    d = Path(dir_path)
+    paths = sorted(d.glob("cam_*.yaml"))
+    if not paths:
+        raise FileNotFoundError(f"no cam_*.yaml configs in {d}")
+    return [load_camera_config(p) for p in paths]

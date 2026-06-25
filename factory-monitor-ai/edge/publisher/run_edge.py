@@ -13,12 +13,10 @@ from edge.vision.debounce import DebounceConfig, TrackDebouncer
 from edge.vision.detector import Detection, PpeDetector
 from edge.vision.engine import VisionEngine
 from edge.vision.frame_source import RtspFrameSource
-from edge.vision.zone_config import load_camera_config
+from edge.vision.zone_config import load_all_camera_configs
 
 TOPIC = "vision.anomalies.v1"
-CONFIG_PATH = (
-    Path(__file__).resolve().parents[1] / "config" / "cameras" / "cam_01.yaml"
-)
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config" / "cameras"
 
 
 class ByteTrackTracker:
@@ -78,32 +76,43 @@ async def amain() -> None:
 
     _hb_task = asyncio.create_task(_heartbeat())
 
-    cfg = load_camera_config(CONFIG_PATH)
+    cfgs = load_all_camera_configs(CONFIG_DIR)
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 
     from ultralytics import YOLO
 
     weights = os.environ.get("EDGE_WEIGHTS", "edge/models/yolov8n.pt")
+    # ONE shared detector — holds the YOLO weights in memory once for all cameras.
     detector = PpeDetector(YOLO(weights))
 
-    # Use the hardened producer helper: acks="all" + enable_idempotence=True
+    # ONE shared producer — acks="all" + enable_idempotence=True (via make_producer).
     producer = await make_producer(bootstrap)
 
     async def publish(key: str, ev: AnomalyEvent) -> None:
         await publish_event(producer, TOPIC, ev)
 
-    engine = VisionEngine(
-        cfg,
-        detector=detector,
-        tracker=ByteTrackTracker(),
-        debouncer=TrackDebouncer(
-            DebounceConfig(window=12, m_of_n=8, clear_consecutive=6)
-        ),
-        publish=publish,
-        frame_source=RtspFrameSource(cfg.rtsp_url),
-    )
+    # PER-CAMERA tracker, debouncer, and frame source so that track-id spaces
+    # cannot collide across cameras (ByteTrack counters are instance-local).
+    # NOTE: asyncio.gather runs engines concurrently but does NOT parallelize the
+    # synchronous detect step — all engines share the GIL-bound event loop thread.
+    # This is acceptable for the demo; real multi-camera throughput (thread/process
+    # pool per camera or batched inference) is deferred to a later phase.
+    engines = [
+        VisionEngine(
+            cfg,
+            detector=detector,  # shared
+            tracker=ByteTrackTracker(),  # per-camera (own track-id space)
+            debouncer=TrackDebouncer(
+                DebounceConfig(window=12, m_of_n=8, clear_consecutive=6)
+            ),
+            publish=publish,
+            frame_source=RtspFrameSource(cfg.rtsp_url),
+        )
+        for cfg in cfgs
+    ]
+    tasks = [asyncio.create_task(e.run()) for e in engines]
     try:
-        await engine.run()
+        await asyncio.gather(*tasks)
     finally:
         _hb_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

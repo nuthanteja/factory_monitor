@@ -140,6 +140,45 @@ notification delivery is **at-least-once** (see "Delivery semantics" above).
 > URL matches what Twilio used — see the TODO comment in
 > `cloud/api/twilio_webhook.py`.
 
+## Observability
+
+Three correlated signals — traces, metrics, logs — ship behind an opt-in Compose
+profile so the base stack stays lean when you don't want them:
+
+```bash
+docker compose -f compose.yaml -f compose.observability.yaml --profile obs --profile edge up -d
+```
+
+- **Grafana** http://localhost:3000 — 6 provisioned dashboards (camera liveness,
+  event pipeline, incidents/escalation, worker fleet, SLO / golden-signals, infra)
+- **Prometheus** http://localhost:9090 · **Alertmanager** http://localhost:9093 ·
+  **Tempo** (traces) and **Loki** (logs) wired as Grafana datasources
+
+**Traces.** Every service emits OpenTelemetry spans through a collector-optional
+exporter — when no collector is configured the tracer is fully inert, so telemetry
+can never break the app. W3C `traceparent` rides **Kafka headers** across the
+edge→ingest hop (where there's no HTTP request to carry it), and the React UI
+propagates it onto its `/api` calls. The result is one trace from a browser action
+through FastAPI, the escalation worker, and the notifier. The browser tracer is the
+same inert-by-default design: with no endpoint set it registers nothing.
+
+**Metrics.** Prometheus scrapes a `/metrics` endpoint on each service plus
+Kafka/Postgres/Redis exporters. Backlog gauges (`escalation_due_rows`,
+`outbox_pending`) read the database **at scrape time** on a dedicated connection with
+a short statement timeout, and go *absent* on any error rather than reporting a stale
+zero — so a real backlog can't hide behind a cached value, and a slow scrape can never
+starve the hot path. Label cardinality is pinned to bounded enums (no per-incident ids).
+
+**Logs.** promtail ships the services' structured JSON logs to Loki and promotes
+`trace_id` to a label only when present (a template guard, not a blanket label-drop),
+so a trace in Grafana links straight to its logs and back.
+
+**Alerts.** Six rules — edge heartbeat loss, camera staleness, escalation backlog,
+Kafka consumer lag, a worker-fleet dead-man's-switch, and a watchdog. Each rule's
+fire *and* silence behaviour (including threshold boundaries and `for:` debounce) is
+verified in CI by a `promtool test rules` suite, so a broken expression fails the
+build rather than the pager.
+
 ## Make targets
 
 `make up` · `make down` · `make logs` · `make topics` · `make migrate` · `make test`

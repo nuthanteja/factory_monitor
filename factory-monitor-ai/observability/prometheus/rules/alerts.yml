@@ -1,0 +1,65 @@
+groups:
+  - name: factory_monitor_alerts
+    rules:
+      # Rule 1: Edge heartbeat dead-man's switch.
+      # absent_over_time yields a LABEL-LESS vector — never reference $labels.node.
+      - alert: EdgeHeartbeatMissing
+        expr: absent_over_time(edge_heartbeat_total[30s])
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Edge heartbeat absent for more than 30 s"
+          description: "No edge_heartbeat_total samples received in the last 30 s. The edge node may be down or unreachable."
+
+      # Rule 2: Camera frame staleness. camera_id + job labels survive.
+      - alert: CameraStale
+        expr: time() - cam_last_frame_seconds > 30
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Camera {{ $labels.camera_id }} has stale frames"
+          description: "cam_last_frame_seconds for camera {{ $labels.camera_id }} is more than 30 s behind wall-clock time."
+
+      # Rule 3: Escalation backlog — DB-backed gauge, no DB error = absent (fires too).
+      - alert: EscalationBacklog
+        expr: escalation_due_rows > 50
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Escalation backlog ({{ $value }} rows) exceeds threshold"
+          description: "escalation_due_rows has been above 50 for more than 2 minutes."
+
+      # Rule 4: Kafka consumer lag. Aggregate by consumergroup to avoid per-partition noise.
+      - alert: KafkaConsumerLagHigh
+        expr: max by (consumergroup) (kafka_consumergroup_lag) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer group {{ $labels.consumergroup }} lag is {{ $value }}"
+          description: "Consumer group {{ $labels.consumergroup }} has had lag above 1000 for more than 5 minutes."
+
+      # Rule 5: All worker instances are down.
+      - alert: WorkerFleetDown
+        expr: sum(up{job=~".*worker"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All factory-monitor workers are down"
+          description: "sum(up{job=~\".*worker\"}) == 0 for more than 1 minute — no worker instances are scrape-reachable."
+
+  - name: factory_monitor_watchdog
+    rules:
+      # Rule 6: Watchdog — always firing; silence it in Alertmanager to prove the pipeline works.
+      - alert: Watchdog
+        expr: vector(1)
+        for: 0s
+        labels:
+          severity: none
+        annotations:
+          summary: "Watchdog — Alertmanager pipeline liveness check"
+          description: "This alert always fires. If you stop receiving it your alert pipeline is broken."

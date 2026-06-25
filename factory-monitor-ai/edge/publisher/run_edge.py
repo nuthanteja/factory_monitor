@@ -56,6 +56,14 @@ class ByteTrackTracker:
 
 
 async def amain() -> None:
+    from cloud.common.config import get_settings as _get_settings
+    from cloud.common.logging_json import setup_json_logging
+    from cloud.common.telemetry import setup_telemetry
+
+    setup_json_logging()
+    _s = _get_settings()
+    setup_telemetry(_s.otel_service_name or "edge", endpoint=_s.otel_exporter_otlp_endpoint)
+
     cfg = load_camera_config(CONFIG_PATH)
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 

@@ -16,7 +16,18 @@ from cloud.common.ws.manager import ConnectionManager
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    from cloud.common.logging_json import setup_json_logging
+    from cloud.common.telemetry import setup_telemetry
+
     _settings = settings or Settings()
+
+    setup_json_logging()
+    setup_telemetry(
+        _settings.otel_service_name or "api",
+        endpoint=_settings.otel_exporter_otlp_endpoint,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # noqa: ANN001
@@ -32,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await close_redis()
 
     app = FastAPI(title="Factory Monitor API", version="1.0.0", lifespan=lifespan)
+    FastAPIInstrumentor.instrument_app(app)
     app.include_router(router)
     app.include_router(webhook_router)
     app.include_router(ws_router)

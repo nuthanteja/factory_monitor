@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import numpy as np
+from opentelemetry import trace as _otel_trace
 
 from cloud.common.schemas.anomaly import AnomalyEvent, Evidence
 from edge.vision.debounce import (
@@ -17,6 +18,8 @@ from edge.vision.debounce import (
 from edge.vision.detector import Detection
 from edge.vision.frame_source import FrameSource, StubFrameSource  # noqa: F401
 from edge.vision.zone_config import CameraConfig
+
+_tracer = _otel_trace.get_tracer("factory_monitor.edge")
 
 RULE_ID = "PPE_NO_HARDHAT"
 ANOMALY_TYPE = "ppe_no_hardhat"
@@ -123,6 +126,13 @@ class VisionEngine:
                         anomaly = build_anomaly_event(
                             self.cfg, zone.zone_id, det, track_id, self.clock()
                         )
-                        await self._emit(self.cfg.camera_id, anomaly)
+                        with _tracer.start_as_current_span(
+                            "edge.detect",
+                            attributes={
+                                "camera_id": self.cfg.camera_id,
+                                "anomaly_type": anomaly.anomaly_type,
+                            },
+                        ):
+                            await self._emit(self.cfg.camera_id, anomaly)
                         published += 1
         return published

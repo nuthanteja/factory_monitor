@@ -11,15 +11,19 @@ from cloud.common.redis_client import get_redis
 from cloud.common.ws_publisher import publish_incident_event
 from cloud.escalation_worker.worker import EscalationWorker
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    from cloud.common.logging_json import setup_json_logging
+    from cloud.common.telemetry import setup_telemetry
+
+    setup_json_logging()
     settings = get_settings()
+    setup_telemetry(
+        settings.otel_service_name or "escalation_worker",
+        endpoint=settings.otel_exporter_otlp_endpoint,
+    )
     maker = session_factory(settings)
 
     redis_client = get_redis(settings)

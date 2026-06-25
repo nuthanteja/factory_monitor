@@ -9,12 +9,19 @@ from cloud.common.db.session import session_factory
 from cloud.notifications.chain import ProviderChain, build_provider_chain
 from cloud.notifier_worker.relay import run_forever
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("factory_monitor.notifier_worker")
 
 
 async def main() -> None:
+    from cloud.common.logging_json import setup_json_logging
+    from cloud.common.telemetry import setup_telemetry
+
+    setup_json_logging()
     settings = get_settings()
+    setup_telemetry(
+        settings.otel_service_name or "notifier_worker",
+        endpoint=settings.otel_exporter_otlp_endpoint,
+    )
     maker = session_factory(settings)
     chain = ProviderChain(build_provider_chain(settings))
     logger.info(

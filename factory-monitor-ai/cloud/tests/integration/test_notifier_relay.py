@@ -331,3 +331,57 @@ async def test_notifier_send_emits_span(maker: async_sessionmaker):
     spans = [s for s in exporter.get_finished_spans() if s.name == "notifier.send"]
     assert spans, "expected a notifier.send span"
     assert spans[0].attributes["outbox_id"] == str(ob_id)
+
+
+# ── Test 9: successful send increments notifier_sends_total + histogram ─────────
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_notifier_metrics_recorded(maker: async_sessionmaker):
+    from cloud.common.metrics import REGISTRY
+
+    async with maker() as s:
+        inc_id = await _seed_incident(s)
+        await _seed_outbox(s, inc_id)
+        await s.commit()
+    sent_before = REGISTRY.get_sample_value(
+        "notifier_sends_total", {"channel": "console", "result": "sent"}
+    ) or 0.0
+    await run_once(maker, ProviderChain([ConsoleProvider()]))
+    sent_after = REGISTRY.get_sample_value(
+        "notifier_sends_total", {"channel": "console", "result": "sent"}
+    )
+    send_count = REGISTRY.get_sample_value(
+        "notifier_send_seconds_count", {"channel": "console"}
+    )
+    assert sent_after == sent_before + 1
+    assert send_count >= 1
+
+
+# ── Test 10: DEAD row increments dead literal + provider_send_failures_total ────
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_notifier_dead_result_increments(maker: async_sessionmaker):
+    from cloud.common.metrics import REGISTRY
+
+    async with maker() as s:
+        inc_id = await _seed_incident(s)
+        await _seed_outbox(s, inc_id, max_attempts=1)  # one failing attempt → DEAD
+        await s.commit()
+    failing = AsyncMock()
+    failing.send = AsyncMock(
+        return_value=ProviderResult(sid=None, status="failed", channel="whatsapp")
+    )
+    dead_before = REGISTRY.get_sample_value(
+        "notifier_sends_total", {"channel": "whatsapp", "result": "dead"}
+    ) or 0.0
+    await run_once(maker, ProviderChain([failing]))
+    dead_after = REGISTRY.get_sample_value(
+        "notifier_sends_total", {"channel": "whatsapp", "result": "dead"}
+    )
+    fail_after = REGISTRY.get_sample_value(
+        "provider_send_failures_total", {"provider": "whatsapp"}
+    )
+    assert dead_after == dead_before + 1  # the LITERAL 'dead' — not result.status
+    assert fail_after >= 1

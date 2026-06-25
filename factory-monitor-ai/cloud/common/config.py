@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # --- Observability (Phase 3b) ---
     otel_exporter_otlp_endpoint: str | None = None
     otel_service_name: str | None = None
+    ingest_metrics_port: int = 9101
+    escalation_metrics_port: int = 9102
+    notifier_metrics_port: int = 9103
+    edge_metrics_port: int = 9108
 
 
 @lru_cache(maxsize=1)

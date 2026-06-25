@@ -22,6 +22,12 @@ async def main() -> None:
         settings.otel_service_name or "notifier_worker",
         endpoint=settings.otel_exporter_otlp_endpoint,
     )
+    from cloud.common.metrics import _register_once, make_due_collector, start_metrics_server
+    start_metrics_server(settings.notifier_metrics_port)
+    _register_once(make_due_collector(
+        "outbox_pending", "Outbox rows awaiting delivery (PENDING or SENDING).",
+        "SELECT count(*) FROM outbox WHERE status IN ('PENDING','SENDING')", settings,
+    ))
     maker = session_factory(settings)
     chain = ProviderChain(build_provider_chain(settings))
     logger.info(

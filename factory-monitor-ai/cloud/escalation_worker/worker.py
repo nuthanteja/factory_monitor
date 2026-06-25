@@ -12,14 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from opentelemetry import trace as _otel_trace
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cloud.common.db.models import Incident, IncidentStatus
+from cloud.common.metrics import (
+    escalation_claim_latency_seconds,
+    escalation_fire_lag_seconds,
+    escalations_fired_total,
+)
 from cloud.common.ws_events import CHANGE_TIER_ADVANCED, incident_change
 from cloud.escalation_worker.transition import TransitionResult, fire_transition
 
@@ -94,81 +101,92 @@ async def poll_once_ids(
     skips and defensive-recheck skips are NOT included).
     """
     fired_ids: list[uuid.UUID] = []
+    _t0 = time.perf_counter()
+    try:
+        async with session_maker() as claim_session:
+            rows = (
+                await claim_session.execute(
+                    _CLAIM_SQL,
+                    {
+                        "worker_id": worker_id,
+                        "lease_seconds": lease_seconds,
+                        "statuses": list(_ACTIVE_STATUSES),
+                        "batch": batch,
+                    },
+                )
+            ).fetchall()
+            await claim_session.commit()
 
-    async with session_maker() as claim_session:
-        rows = (
-            await claim_session.execute(
-                _CLAIM_SQL,
-                {
-                    "worker_id": worker_id,
-                    "lease_seconds": lease_seconds,
-                    "statuses": list(_ACTIVE_STATUSES),
-                    "batch": batch,
-                },
-            )
-        ).fetchall()
-        await claim_session.commit()
-
-    for row in rows:
-        incident_id = row[0]
-        try:
-            async with session_maker() as txn_session:
-                # Per-incident exclusion: claim phase used SKIP LOCKED; here we
-                # FOR UPDATE re-lock the row so the read+transition is atomic w.r.t.
-                # a concurrent Ack/Resolve UPDATE (they cannot interleave between
-                # our read and our write — no cross-transaction row-lock continuity).
-                incident = (
-                    await txn_session.execute(
-                        select(Incident)
-                        .where(Incident.id == incident_id)
-                        .with_for_update()
-                    )
-                ).scalar_one_or_none()
-                # Defensive re-check: skip if the incident was closed/changed since
-                # the claim (e.g., operator acknowledged between claim commit and here).
-                if (
-                    incident is None
-                    or incident.status.value not in _ACTIVE_STATUSES
-                    or incident.next_fire_at is None
-                ):
-                    continue
-                _tracer = _otel_trace.get_tracer("factory_monitor.escalation_worker")
-                with _tracer.start_as_current_span(
-                    "escalation.transition",
-                    attributes={"incident_id": str(incident_id)},
-                ) as _span:
-                    result: TransitionResult = await fire_transition(txn_session, incident)
-                    if result.fired and result.new_status is not None:
-                        _span.set_attribute("tier", incident.current_tier + 1)
-                    # Chaos seam (inert in production): a kill here leaves the claim
-                    # committed but the transition uncommitted → rolled back on exit →
-                    # reclaimed by a survivor after the lease expires (Task 5 proves it).
-                    if fault_hook is not None:
-                        await fault_hook(incident_id)
-                    await txn_session.commit()
-                if result.fired:
-                    fired_ids.append(incident_id)
-                    logger.info(
-                        "escalation fired incident_id=%s new_status=%s",
-                        incident_id, result.new_status,
-                    )
-                elif result.skipped_idempotent:
-                    logger.debug(
-                        "escalation skipped (idempotent) incident_id=%s", incident_id
-                    )
-        except Exception:
-            logger.exception(
-                "error processing incident_id=%s — claim will expire naturally", incident_id
-            )
-            # Release claim eagerly so it's re-claimable without waiting for lease expiry
+        for row in rows:
+            incident_id = row[0]
             try:
-                async with session_maker() as rel_session:
-                    await rel_session.execute(_RELEASE_CLAIM_SQL, {"id": incident_id})
-                    await rel_session.commit()
+                async with session_maker() as txn_session:
+                    # Per-incident exclusion: claim phase used SKIP LOCKED; here we
+                    # FOR UPDATE re-lock the row so the read+transition is atomic w.r.t.
+                    # a concurrent Ack/Resolve UPDATE (they cannot interleave between
+                    # our read and our write — no cross-transaction row-lock continuity).
+                    incident = (
+                        await txn_session.execute(
+                            select(Incident)
+                            .where(Incident.id == incident_id)
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    # Defensive re-check: skip if the incident was closed/changed since
+                    # the claim (e.g., operator acknowledged between claim commit and here).
+                    if (
+                        incident is None
+                        or incident.status.value not in _ACTIVE_STATUSES
+                        or incident.next_fire_at is None
+                    ):
+                        continue
+                    _tracer = _otel_trace.get_tracer("factory_monitor.escalation_worker")
+                    with _tracer.start_as_current_span(
+                        "escalation.transition",
+                        attributes={"incident_id": str(incident_id)},
+                    ) as _span:
+                        result: TransitionResult = await fire_transition(txn_session, incident)
+                        if result.fired and result.new_status is not None:
+                            _span.set_attribute("tier", incident.current_tier + 1)
+                        # Chaos seam (inert in production): a kill here leaves the claim
+                        # committed but the transition uncommitted → rolled back on exit →
+                        # reclaimed by a survivor after the lease expires (Task 5 proves it).
+                        if fault_hook is not None:
+                            await fault_hook(incident_id)
+                        await txn_session.commit()
+                    if result.fired:
+                        _tier = str(incident.current_tier + 1)
+                        fired_ids.append(incident_id)
+                        escalations_fired_total.labels(tier=_tier, result="fired").inc()
+                        escalation_fire_lag_seconds.labels(tier=_tier).observe(
+                            max((datetime.now(UTC) - incident.next_fire_at).total_seconds(), 0.0)
+                        )
+                        logger.info(
+                            "escalation fired incident_id=%s new_status=%s",
+                            incident_id, result.new_status,
+                        )
+                    elif result.skipped_idempotent:
+                        escalations_fired_total.labels(
+                            tier=str(incident.current_tier + 1), result="skipped_idempotent"
+                        ).inc()
+                        logger.debug(
+                            "escalation skipped (idempotent) incident_id=%s", incident_id
+                        )
             except Exception:
-                logger.warning("failed to release claim for incident_id=%s", incident_id)
+                logger.exception(
+                    "error processing incident_id=%s — claim will expire naturally", incident_id
+                )
+                # Release claim eagerly so it's re-claimable without waiting for lease expiry
+                try:
+                    async with session_maker() as rel_session:
+                        await rel_session.execute(_RELEASE_CLAIM_SQL, {"id": incident_id})
+                        await rel_session.commit()
+                except Exception:
+                    logger.warning("failed to release claim for incident_id=%s", incident_id)
 
-    return fired_ids
+        return fired_ids
+    finally:
+        escalation_claim_latency_seconds.observe(time.perf_counter() - _t0)
 
 
 class EscalationWorker:

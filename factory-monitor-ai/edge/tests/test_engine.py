@@ -227,6 +227,28 @@ def _engine_with_violation(publish=None):
 
 
 @pytest.mark.asyncio
+async def test_edge_metrics_recorded():
+    from cloud.common.metrics import REGISTRY
+
+    engine = _engine_with_violation()
+    cam = engine.cfg.camera_id
+    frames_before = REGISTRY.get_sample_value("frames_in_total", {"camera_id": cam}) or 0.0
+    await engine.run(max_frames=12)
+    frames_after = REGISTRY.get_sample_value("frames_in_total", {"camera_id": cam})
+    events_after = REGISTRY.get_sample_value(
+        "events_emitted_total", {"type": "ppe_no_hardhat", "camera_id": cam}
+    )
+    last_frame = REGISTRY.get_sample_value("cam_last_frame_seconds", {"camera_id": cam})
+    e2e_count = REGISTRY.get_sample_value("e2e_detect_to_publish_seconds_count", {"camera_id": cam})
+    assert frames_after == frames_before + 12
+    assert events_after >= 1
+    assert last_frame and last_frame > 0
+    assert e2e_count >= 1
+    # inference_fps is DROPPED (derived in PromQL) — must NOT be registered
+    assert REGISTRY.get_sample_value("inference_fps", {"camera_id": cam}) is None
+
+
+@pytest.mark.asyncio
 async def test_edge_detect_span_per_confirmed_anomaly():
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 

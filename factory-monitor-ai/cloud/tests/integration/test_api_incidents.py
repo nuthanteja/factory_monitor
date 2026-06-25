@@ -88,6 +88,23 @@ async def client(session_maker):
         yield c
 
 
+@pytest_asyncio.fixture
+async def bare_client():
+    """Minimal client with no DB override — sufficient for routes with no DB dependency."""
+    app = create_app(Settings(ws_fanout_enabled=False))
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_metrics_endpoint(bare_client):
+    resp = await bare_client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    assert "escalations_fired_total" in resp.text
+
+
 @pytest.mark.asyncio
 async def test_healthz(client):
     resp = await client.get("/healthz")

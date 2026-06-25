@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -9,6 +10,12 @@ from typing import Protocol
 import numpy as np
 from opentelemetry import trace as _otel_trace
 
+from cloud.common.metrics import (
+    cam_last_frame_seconds,
+    e2e_detect_to_publish_seconds,
+    events_emitted_total,
+    frames_in_total,
+)
 from cloud.common.schemas.anomaly import AnomalyEvent, Evidence
 from edge.vision.debounce import (
     DebounceEvent,
@@ -107,6 +114,9 @@ class VisionEngine:
         for i, frame in enumerate(self.frame_source.frames()):
             if max_frames is not None and i >= max_frames:
                 break
+            frames_in_total.labels(camera_id=self.cfg.camera_id).inc()
+            cam_last_frame_seconds.labels(camera_id=self.cfg.camera_id).set(time.time())
+            _t_detect = time.perf_counter()
             detections = self.detector.detect(frame)
             tracked = self.tracker.update(detections)
             for raw_id, det in tracked:
@@ -132,5 +142,11 @@ class VisionEngine:
                             },
                         ):
                             await self._emit(self.cfg.camera_id, anomaly)
+                            events_emitted_total.labels(
+                                type=anomaly.anomaly_type.value, camera_id=self.cfg.camera_id
+                            ).inc()
+                            e2e_detect_to_publish_seconds.labels(
+                                camera_id=self.cfg.camera_id
+                            ).observe(time.perf_counter() - _t_detect)
                         published += 1
         return published

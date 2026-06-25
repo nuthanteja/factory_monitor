@@ -24,6 +24,16 @@ async def main() -> None:
         settings.otel_service_name or "escalation_worker",
         endpoint=settings.otel_exporter_otlp_endpoint,
     )
+    from cloud.common.metrics import _register_once, make_due_collector, start_metrics_server
+    start_metrics_server(settings.escalation_metrics_port)
+    _register_once(make_due_collector(
+        "escalation_due_rows",
+        "Incidents due or overdue for escalation (claimable backlog).",
+        "SELECT count(*) FROM incidents WHERE status IN "
+        "('AWAITING_OPERATOR','TIER1','TIER2') AND next_fire_at IS NOT NULL "
+        "AND next_fire_at <= now() AND (claimed_until IS NULL OR claimed_until < now())",
+        settings,
+    ))
     maker = session_factory(settings)
 
     redis_client = get_redis(settings)

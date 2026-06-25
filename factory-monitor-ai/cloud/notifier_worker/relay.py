@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.common.db.models import Message, Outbox
+from cloud.common.metrics import (
+    notifier_send_seconds,
+    notifier_sends_total,
+    provider_send_failures_total,
+)
 from cloud.notifications.chain import ProviderChain
 from cloud.notifications.provider import NotificationKind
 
@@ -124,6 +130,7 @@ async def _settle_row(
             **({"incident_id": str(row.incident_id)} if row.incident_id else {}),
         },
     ):
+        _t0 = time.perf_counter()
         result = await provider_chain.send(
             row.to_phone_e164,
             kind,
@@ -132,6 +139,7 @@ async def _settle_row(
             body=row.body,
             idempotency_key=str(row.id),
         )
+    notifier_send_seconds.labels(channel=result.channel).observe(time.perf_counter() - _t0)
 
     # Crash seam: the row is committed-SENDING and the message may already be out.
     # If we die here, the row is reclaimed after its lease and re-sent — the
@@ -140,6 +148,9 @@ async def _settle_row(
         await fault_hook(row.id)
 
     now = datetime.now(tz=UTC)
+
+    _result_label: str = "other"
+    _failed: bool = False
 
     async with session_maker() as session:
         ob = (
@@ -169,6 +180,8 @@ async def _settle_row(
                     status="sent",
                 )
             )
+            _result_label = "sent"
+            _failed = False
             logger.info(
                 "outbox id=%s SENT via %s sid=%s idem_key=%s",
                 row.id, result.channel, result.sid, str(row.id),
@@ -177,6 +190,8 @@ async def _settle_row(
             ob.status = "DEAD"
             ob.claimed_by = None
             ob.claimed_until = None
+            _result_label = "dead"
+            _failed = True
             logger.error(
                 "outbox id=%s DEAD after %d attempts — ALERT: delivery failed permanently",
                 row.id, ob.attempts,
@@ -186,6 +201,10 @@ async def _settle_row(
             ob.next_attempt_at = now + _backoff(ob.attempts, backoff_base)
             ob.claimed_by = None
             ob.claimed_until = None
+            _result_label = (
+                result.status if result.status in ("degraded", "failed") else "other"
+            )
+            _failed = True
             logger.warning(
                 "outbox id=%s delivery %s (attempt %d/%d); retry at %s",
                 row.id, result.status, ob.attempts, ob.max_attempts,
@@ -193,6 +212,9 @@ async def _settle_row(
             )
 
         await session.commit()
+        notifier_sends_total.labels(channel=result.channel, result=_result_label).inc()
+        if _failed:
+            provider_send_failures_total.labels(provider=result.channel).inc()
 
 
 class NotifierRelay:

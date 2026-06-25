@@ -94,3 +94,13 @@ def test_outbox_two_phase_columns_and_enum_exist(pg_url):
     idx = {ix["name"] for ix in insp.get_indexes("outbox")}
     assert "idx_outbox_sending_reclaim" in idx
     engine.dispose()
+
+
+def test_outbox_pending_sending_index_exists(pg_url):
+    cfg = _alembic_config(pg_url)
+    command.upgrade(cfg, "head")
+    engine = sa.create_engine(pg_url)
+    insp = sa.inspect(engine)
+    idx = {ix["name"] for ix in insp.get_indexes("outbox")}
+    assert "idx_outbox_pending_sending" in idx
+    engine.dispose()

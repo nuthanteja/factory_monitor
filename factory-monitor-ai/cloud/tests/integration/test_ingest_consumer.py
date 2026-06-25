@@ -211,6 +211,44 @@ async def test_handle_message_with_resolver_enqueues_tier0_outbox(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_ingest_metrics_recorded(session_maker, producer):
+    """Outcome counter increments on 'created'; latency histogram observed once."""
+    from cloud.common.metrics import REGISTRY
+
+    before_counter = REGISTRY.get_sample_value(
+        "ingest_events_consumed_total", {"outcome": "created"}
+    ) or 0.0
+    before_hist = REGISTRY.get_sample_value(
+        "ingest_event_to_incident_latency_seconds_count"
+    ) or 0.0
+
+    eid = str(uuid.uuid4())
+    value = _valid_value(
+        event_id=eid,
+        dedup_key=f"metrics-test|cam_01|PPE_NO_HARDHAT|{eid[:8]}",
+    )
+    status = await handle_message(
+        session_maker, producer, value, b"cam_01",
+        dlq_topic=DLQ_TOPIC, grace_seconds=120,
+    )
+    assert status == "created"
+
+    after_counter = REGISTRY.get_sample_value(
+        "ingest_events_consumed_total", {"outcome": "created"}
+    )
+    after_hist = REGISTRY.get_sample_value(
+        "ingest_event_to_incident_latency_seconds_count"
+    )
+    assert after_counter == before_counter + 1, (
+        f"counter expected {before_counter + 1}, got {after_counter}"
+    )
+    assert after_hist == before_hist + 1, (
+        f"histogram count expected {before_hist + 1}, got {after_hist}"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ingest_consume_span_continues_producer_trace(
     kafka_container: KafkaContainer,
     migrated_url: str,

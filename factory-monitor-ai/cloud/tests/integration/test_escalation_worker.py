@@ -268,6 +268,27 @@ async def test_fault_hook_invoked_with_incident_id_before_commit(maker):
 
 
 @pytest.mark.asyncio
+async def test_escalation_metrics_recorded(maker):
+    from cloud.common.metrics import REGISTRY
+    await _insert_due_incident(maker, IncidentStatus.AWAITING_OPERATOR, 0)
+    fired_before = REGISTRY.get_sample_value(
+        "escalations_fired_total", {"tier": "1", "result": "fired"}
+    ) or 0.0
+    claim_before = REGISTRY.get_sample_value("escalation_claim_latency_seconds_count") or 0.0
+
+    await poll_once(maker, worker_id="metrics", lease_seconds=30, batch=10)
+
+    fired_after = REGISTRY.get_sample_value(
+        "escalations_fired_total", {"tier": "1", "result": "fired"}
+    )
+    lag_after = REGISTRY.get_sample_value("escalation_fire_lag_seconds_count", {"tier": "1"})
+    claim_after = REGISTRY.get_sample_value("escalation_claim_latency_seconds_count")
+    assert fired_after == fired_before + 1          # tier label is the STRING "1"
+    assert lag_after >= 1
+    assert claim_after == claim_before + 1          # one batch timed
+
+
+@pytest.mark.asyncio
 async def test_escalation_transition_emits_span(maker):
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 

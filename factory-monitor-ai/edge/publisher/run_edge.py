@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 from pathlib import Path
 
 from cloud.common.kafka import make_producer, publish_event
@@ -64,6 +65,18 @@ async def amain() -> None:
     _s = _get_settings()
     setup_telemetry(_s.otel_service_name or "edge", endpoint=_s.otel_exporter_otlp_endpoint)
 
+    from cloud.common.metrics import edge_heartbeat_total, start_metrics_server
+
+    start_metrics_server(_s.edge_metrics_port)
+    _node = os.environ.get("EDGE_NODE_NAME") or socket.gethostname()
+
+    async def _heartbeat() -> None:
+        while True:
+            edge_heartbeat_total.labels(node=_node).inc()
+            await asyncio.sleep(5)
+
+    _hb_task = asyncio.create_task(_heartbeat())
+
     cfg = load_camera_config(CONFIG_PATH)
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 
@@ -91,6 +104,7 @@ async def amain() -> None:
     try:
         await engine.run()
     finally:
+        _hb_task.cancel()
         await producer.stop()
 
 

@@ -12,6 +12,7 @@ from cloud.common.config import Settings
 from cloud.common.db.session import session_factory
 from cloud.common.metrics import metrics_response
 from cloud.common.redis_client import close_redis, get_redis
+from cloud.common.seed_cameras import seed_cameras
 from cloud.common.ws.fanout import start_ws_fanout, stop_ws_fanout
 from cloud.common.ws.manager import ConnectionManager
 
@@ -36,6 +37,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if _settings.ws_fanout_enabled:
             app.state.ws_redis = get_redis(_settings)
             await start_ws_fanout(app)
+        if _settings.seed_cameras_enabled:
+            maker = getattr(app.state, "ws_session_maker", None)
+            if maker is not None:
+                await seed_cameras(maker)
         # --- yield to serve requests ---
         yield
         # --- shutdown ---

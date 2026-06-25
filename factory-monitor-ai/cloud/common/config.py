@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     ws_fallback_batch: int = 200           # max incidents re-broadcast per fallback poll
     ws_fanout_enabled: bool = True         # gate: set False in tests to skip Redis/fanout startup
 
+    # Camera/zone seed (Phase 4a)
+    seed_cameras_enabled: bool = True      # gate: set False in tests to skip seeding at startup
+
     # Escalation timing
     operator_grace_seconds: int = 120
     escalation_lease_seconds: int = 30

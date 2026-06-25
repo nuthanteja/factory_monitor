@@ -9,13 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from cloud.api.deps import get_session_maker
-from cloud.common.db.models import Incident
+from cloud.common.db.models import Camera, Incident
 from cloud.common.incident_actions import (
     acknowledge_incident as _ack_incident,
 )
 from cloud.common.incident_actions import (
     resolve_incident as _resolve_incident,
 )
+from cloud.common.schemas.camera import CameraListResponse, CameraOut
 from cloud.common.schemas.incident import IncidentListResponse, IncidentOut
 from cloud.common.ws_events import (
     CHANGE_RESOLVED,
@@ -64,6 +65,18 @@ async def _publish_after(
 @router.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/api/v1/cameras", response_model=CameraListResponse)
+async def list_cameras(
+    session_maker: async_sessionmaker = Depends(get_session_maker),
+) -> CameraListResponse:
+    async with session_maker() as session:
+        rows = (
+            await session.execute(select(Camera).order_by(Camera.id))
+        ).scalars().all()
+    cameras = [CameraOut.model_validate(row) for row in rows]
+    return CameraListResponse(cameras=cameras)
 
 
 @router.get("/api/v1/incidents", response_model=IncidentListResponse)

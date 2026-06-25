@@ -51,13 +51,24 @@ class FakePubSub:
 
 
 class FakeRedis:
-    """Minimal redis fake that vends the same FakePubSub on every pubsub() call."""
+    """Minimal redis fake that vends a FRESH FakePubSub on each pubsub() call.
+
+    The hub creates one pubsub per camera, so each call must return an
+    independent instance to avoid shared-queue cross-talk in tests.
+    """
 
     def __init__(self) -> None:
-        self._pubsub = FakePubSub()
+        self._pubsubs: list[FakePubSub] = []
 
     def pubsub(self) -> FakePubSub:
-        return self._pubsub
+        ps = FakePubSub()
+        self._pubsubs.append(ps)
+        return ps
+
+    @property
+    def _pubsub(self) -> FakePubSub:
+        """Backwards-compat accessor for single-camera tests (returns first pubsub)."""
+        return self._pubsubs[0]
 
 
 class FakeWebSocket:
@@ -243,3 +254,64 @@ async def test_close_cancels_all_relays() -> None:
 
     assert t6.done()
     assert t7.done()
+
+
+@pytest.mark.asyncio
+async def test_multi_camera_no_cross_talk() -> None:
+    """Per-camera pubsub isolation: cam_01 frame never reaches cam_02 socket and vice versa.
+
+    This test FAILS on the old single-shared-pubsub code and PASSES after the fix.
+    It exercises two independent pubsub handles (one per camera) and proves that:
+    - A cam_01 message only arrives on cam_01's socket.
+    - A cam_02 message only arrives on cam_02's socket.
+    - Neither socket receives the other camera's frames.
+    """
+    redis = FakeRedis()
+    hub = DetectionHub(redis)  # type: ignore[arg-type]
+
+    ws1 = FakeWebSocket()
+    ws2 = FakeWebSocket()
+
+    await hub.add("cam_01", ws1)  # type: ignore[arg-type]
+    await hub.add("cam_02", ws2)  # type: ignore[arg-type]
+    await _drain()
+
+    # There must be two separate pubsub handles (one per camera).
+    assert len(redis._pubsubs) == 2, "expected one pubsub per camera"
+    pubsub_cam1 = redis._pubsubs[0]
+    pubsub_cam2 = redis._pubsubs[1]
+
+    # Each pubsub subscribed only to its own channel.
+    assert "detections:cam_01" in pubsub_cam1.subscribed
+    assert "detections:cam_02" not in pubsub_cam1.subscribed
+    assert "detections:cam_02" in pubsub_cam2.subscribed
+    assert "detections:cam_01" not in pubsub_cam2.subscribed
+
+    payload1 = {"camera_id": "cam_01", "boxes": [{"x": 1}]}
+    payload2 = {"camera_id": "cam_02", "boxes": [{"x": 2}]}
+
+    # Inject cam_01 frame into cam_01's pubsub only.
+    pubsub_cam1.inject(payload1)
+
+    for _ in range(30):
+        await asyncio.sleep(0)
+        if ws1.sent:
+            break
+
+    assert len(ws1.sent) == 1, "cam_01 socket should have received exactly 1 frame"
+    assert ws1.sent[0]["data"] == payload1
+    assert len(ws2.sent) == 0, "cam_02 socket must NOT receive cam_01 frame (no cross-talk)"
+
+    # Inject cam_02 frame into cam_02's pubsub only.
+    pubsub_cam2.inject(payload2)
+
+    for _ in range(30):
+        await asyncio.sleep(0)
+        if ws2.sent:
+            break
+
+    assert len(ws2.sent) == 1, "cam_02 socket should have received exactly 1 frame"
+    assert ws2.sent[0]["data"] == payload2
+    assert len(ws1.sent) == 1, "cam_01 socket must NOT receive cam_02 frame (no cross-talk)"
+
+    await hub.close()

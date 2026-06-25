@@ -7,7 +7,7 @@ export interface DetectionBox {
 
 export interface DetectionFrame {
   camera_id: string;
-  ts: string;
+  ts: number;
   frame_w: number;
   frame_h: number;
   seq: number;

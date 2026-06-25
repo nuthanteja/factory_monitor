@@ -27,62 +27,64 @@ class DetectionHub:
 
     def __init__(self, redis_client: object) -> None:
         self._redis = redis_client
-        self._pubsub: object | None = None  # single shared pubsub handle
+        self._pubsubs: dict[str, object] = {}          # camera_id → pubsub handle
         self._sockets: dict[str, set[object]] = {}    # camera_id → set of ws
         self._relay_tasks: dict[str, asyncio.Task[None]] = {}  # camera_id → task
-
-    def _get_pubsub(self) -> object:
-        if self._pubsub is None:
-            self._pubsub = self._redis.pubsub()  # type: ignore[attr-defined]
-        return self._pubsub
+        self._lock = asyncio.Lock()
 
     async def add(self, camera_id: str, ws: object) -> None:
         """Add a WebSocket to the hub for camera_id; start relay on first subscriber."""
-        if camera_id not in self._sockets:
-            self._sockets[camera_id] = set()
+        async with self._lock:
+            if camera_id not in self._sockets:
+                self._sockets[camera_id] = set()
 
-        self._sockets[camera_id].add(ws)
+            self._sockets[camera_id].add(ws)
 
-        if camera_id not in self._relay_tasks:
-            pubsub = self._get_pubsub()
-            await pubsub.subscribe(f"detections:{camera_id}")  # type: ignore[attr-defined]
-            task = asyncio.create_task(self._relay(camera_id))
-            self._relay_tasks[camera_id] = task
-            logger.debug("detection hub: relay started camera=%s", camera_id)
+            if camera_id not in self._relay_tasks:
+                pubsub = self._redis.pubsub()  # type: ignore[attr-defined]
+                await pubsub.subscribe(f"detections:{camera_id}")  # type: ignore[attr-defined]
+                self._pubsubs[camera_id] = pubsub
+                task = asyncio.create_task(self._relay(camera_id, pubsub))
+                self._relay_tasks[camera_id] = task
+                logger.debug("detection hub: relay started camera=%s", camera_id)
 
     async def remove(self, camera_id: str, ws: object) -> None:
         """Remove a WebSocket; unsubscribe + cancel relay when last subscriber leaves."""
-        sockets = self._sockets.get(camera_id)
-        if sockets is not None:
-            sockets.discard(ws)
+        async with self._lock:
+            sockets = self._sockets.get(camera_id)
+            if sockets is not None:
+                sockets.discard(ws)
 
-        if not self._sockets.get(camera_id):
-            # Last subscriber gone — tear down the relay.
-            task = self._relay_tasks.pop(camera_id, None)
-            if task is not None and not task.done():
-                task.cancel()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(task), timeout=2.0
-                    )
-                except (asyncio.CancelledError, TimeoutError):
-                    pass
+            if not self._sockets.get(camera_id):
+                # Last subscriber gone — tear down the relay.
+                task = self._relay_tasks.pop(camera_id, None)
+                if task is not None and not task.done():
+                    task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(task), timeout=2.0
+                        )
+                    except (asyncio.CancelledError, TimeoutError):
+                        pass
 
-            pubsub = self._pubsub
-            if pubsub is not None:
-                try:
-                    await pubsub.unsubscribe(f"detections:{camera_id}")  # type: ignore[attr-defined]
-                except Exception:  # noqa: BLE001
-                    logger.debug(
-                        "detection hub: unsubscribe error camera=%s", camera_id
-                    )
+                pubsub = self._pubsubs.pop(camera_id, None)
+                if pubsub is not None:
+                    try:
+                        await pubsub.unsubscribe(f"detections:{camera_id}")  # type: ignore[attr-defined]
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "detection hub: unsubscribe error camera=%s", camera_id
+                        )
+                    try:
+                        await pubsub.aclose()  # type: ignore[attr-defined]
+                    except Exception:  # noqa: BLE001
+                        pass
 
-            self._sockets.pop(camera_id, None)
-            logger.debug("detection hub: relay stopped camera=%s", camera_id)
+                self._sockets.pop(camera_id, None)
+                logger.debug("detection hub: relay stopped camera=%s", camera_id)
 
-    async def _relay(self, camera_id: str) -> None:
-        """Read messages from pub/sub and fan them out to all sockets for camera_id."""
-        pubsub = self._get_pubsub()
+    async def _relay(self, camera_id: str, pubsub: object) -> None:
+        """Read messages from the per-camera pubsub and fan them out to all sockets."""
         channel = f"detections:{camera_id}"
         try:
             while True:
@@ -122,7 +124,7 @@ class DetectionHub:
             raise
 
     async def close(self) -> None:
-        """Cancel all relay tasks (call on app shutdown)."""
+        """Cancel all relay tasks and close all pubsubs (call on app shutdown)."""
         tasks = list(self._relay_tasks.items())
         for _camera_id, task in tasks:
             if not task.done():
@@ -133,11 +135,11 @@ class DetectionHub:
             )
         self._relay_tasks.clear()
 
-        if self._pubsub is not None:
+        for _camera_id, pubsub in list(self._pubsubs.items()):
             try:
-                await self._pubsub.aclose()  # type: ignore[attr-defined]
+                await pubsub.aclose()  # type: ignore[attr-defined]
             except Exception:  # noqa: BLE001
                 pass
-            self._pubsub = None
+        self._pubsubs.clear()
 
         logger.debug("detection hub: closed")

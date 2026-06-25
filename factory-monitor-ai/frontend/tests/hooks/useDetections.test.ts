@@ -9,7 +9,7 @@ function makeFrame(seq: number): { type: string; data: DetectionFrame } {
     type: "detection.frame",
     data: {
       camera_id: "cam_01",
-      ts: "2026-06-25T00:00:00Z",
+      ts: 1750809600.0,
       frame_w: 640,
       frame_h: 480,
       seq,

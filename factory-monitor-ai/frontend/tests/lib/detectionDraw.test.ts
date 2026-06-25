@@ -28,7 +28,7 @@ function makeBox(over: Partial<DetectionBox> = {}): DetectionBox {
 }
 
 function makeFrame(boxes: DetectionBox[]): DetectionFrame {
-  return { camera_id: "cam_01", ts: "t", frame_w: 640, frame_h: 480, seq: 1, boxes };
+  return { camera_id: "cam_01", ts: 0, frame_w: 640, frame_h: 480, seq: 1, boxes };
 }
 
 describe("drawDetections", () => {

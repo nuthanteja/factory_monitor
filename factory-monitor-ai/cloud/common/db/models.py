@@ -191,6 +191,10 @@ class Outbox(Base):
             "idx_outbox_due", "next_attempt_at",
             postgresql_where=text("status = 'PENDING'"),
         ),
+        Index(
+            "idx_outbox_pending_sending", "status",
+            postgresql_where=text("status IN ('PENDING','SENDING')"),
+        ),
     )
 
 

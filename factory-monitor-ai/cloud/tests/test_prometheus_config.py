@@ -1,0 +1,57 @@
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+def _obs() -> Path:
+    return Path(__file__).resolve().parents[2] / "observability"
+
+
+EXPECTED = {
+    "ingest_worker": "ingest_worker:9101",
+    "escalation_worker": "escalation_worker:9102",
+    "notifier_worker": "notifier_worker:9103",
+    "edge": "edge:9108",
+    "api": "api:8000",
+    "kafka-exporter": "kafka-exporter:9308",
+    "postgres-exporter": "postgres-exporter:9187",
+    "redis-exporter": "redis-exporter:9121",
+}
+
+
+def test_scrape_jobs_match_real_targets():
+    cfg = yaml.safe_load((_obs() / "prometheus" / "prometheus.yml").read_text())
+    jobs = {j["job_name"]: j["static_configs"][0]["targets"][0] for j in cfg["scrape_configs"]}
+    assert jobs == EXPECTED
+    api = next(j for j in cfg["scrape_configs"] if j["job_name"] == "api")
+    assert api["metrics_path"] == "/metrics"
+    am_targets = cfg["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"]
+    assert cfg["rule_files"] and am_targets == ["alertmanager:9093"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker required")
+def test_promtool_check_config():
+    obs = _obs()
+    r = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "promtool",
+            "-v",
+            f"{obs.as_posix()}:/work",
+            "prom/prometheus:v2.53.0",
+            "check",
+            "config",
+            "/work/prometheus/prometheus.yml",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "SUCCESS" in (r.stdout + r.stderr)

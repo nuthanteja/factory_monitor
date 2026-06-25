@@ -205,3 +205,40 @@ async def test_engine_skips_violation_outside_zone():
     )
     count = await engine.run()
     assert count == 0
+
+
+def _engine_with_violation(publish=None):
+    """Build a VisionEngine whose detector always returns a no_hardhat violation."""
+    if publish is None:
+        publish = lambda key, ev: None  # noqa: E731
+
+    viol = Detection("person", (600, 300, 100, 300), 0.91, no_hardhat=True)
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    return VisionEngine(
+        CFG,
+        detector=_FixedDetector([viol]),
+        tracker=_FakeTracker(),
+        debouncer=TrackDebouncer(
+            DebounceConfig(window=12, m_of_n=8, clear_consecutive=6)
+        ),
+        publish=publish,
+        frame_source=StubFrameSource([frame] * 12),
+    )
+
+
+@pytest.mark.asyncio
+async def test_edge_detect_span_per_confirmed_anomaly():
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from cloud.common.telemetry import reset_telemetry, setup_telemetry
+
+    exporter = InMemorySpanExporter()
+    reset_telemetry()
+    setup_telemetry("edge-test", exporter=exporter)
+
+    engine = _engine_with_violation()
+    await engine.run(max_frames=12)
+
+    spans = [s for s in exporter.get_finished_spans() if s.name == "edge.detect"]
+    assert len(spans) >= 1
+    assert spans[0].attributes["camera_id"]

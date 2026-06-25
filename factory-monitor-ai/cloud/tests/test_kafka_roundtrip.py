@@ -60,3 +60,38 @@ async def test_publish_then_consume(kafka_bootstrap):
 
     assert msg.key == ev.camera_id.encode("utf-8")
     assert deserialize_event(msg.value) == ev
+
+
+@pytest.mark.asyncio
+async def test_publish_event_writes_traceparent_header(kafka_bootstrap):
+    import asyncio as _asyncio
+    import uuid as _uuid
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from cloud.common.telemetry import reset_telemetry, setup_telemetry
+
+    reset_telemetry()
+    setup_telemetry("test-producer", exporter=InMemorySpanExporter())
+
+    topic = f"trace-hdr-{_uuid.uuid4().hex[:8]}"
+    producer = await make_producer(bootstrap=kafka_bootstrap)
+    consumer = await make_consumer(
+        topic, group_id=f"g-{_uuid.uuid4().hex[:6]}", bootstrap=kafka_bootstrap,
+        auto_offset_reset="earliest",
+    )
+    try:
+        event = _event()
+        tracer = trace.get_tracer("t")
+        with tracer.start_as_current_span("edge.detect") as span:
+            expected_tid = format(span.get_span_context().trace_id, "032x")
+            await publish_event(producer, topic, event)
+        msg = await _asyncio.wait_for(consumer.getone(), timeout=30)
+        # locate the traceparent value (key may be str or bytes depending on aiokafka version)
+        tp = next(v for k, v in msg.headers if k == "traceparent")
+        assert expected_tid in tp.decode("utf-8")
+        assert deserialize_event(msg.value).camera_id == event.camera_id
+    finally:
+        await producer.stop()
+        await consumer.stop()

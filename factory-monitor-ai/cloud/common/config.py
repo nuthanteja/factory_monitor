@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # TWILIO_SKIP_SIGNATURE_CHECK — deliberate dev/test opt-in only
     twilio_skip_signature_check: bool = False
 
+    # --- Observability (Phase 3b) ---
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_service_name: str | None = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

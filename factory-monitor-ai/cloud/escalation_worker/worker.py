@@ -15,6 +15,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
+from opentelemetry import trace as _otel_trace
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -131,13 +132,20 @@ async def poll_once_ids(
                     or incident.next_fire_at is None
                 ):
                     continue
-                result: TransitionResult = await fire_transition(txn_session, incident)
-                # Chaos seam (inert in production): a kill here leaves the claim
-                # committed but the transition uncommitted → rolled back on exit →
-                # reclaimed by a survivor after the lease expires (Task 5 proves it).
-                if fault_hook is not None:
-                    await fault_hook(incident_id)
-                await txn_session.commit()
+                _tracer = _otel_trace.get_tracer("factory_monitor.escalation_worker")
+                with _tracer.start_as_current_span(
+                    "escalation.transition",
+                    attributes={"incident_id": str(incident_id)},
+                ) as _span:
+                    result: TransitionResult = await fire_transition(txn_session, incident)
+                    if result.fired and result.new_status is not None:
+                        _span.set_attribute("tier", incident.current_tier + 1)
+                    # Chaos seam (inert in production): a kill here leaves the claim
+                    # committed but the transition uncommitted → rolled back on exit →
+                    # reclaimed by a survivor after the lease expires (Task 5 proves it).
+                    if fault_hook is not None:
+                        await fault_hook(incident_id)
+                    await txn_session.commit()
                 if result.fired:
                     fired_ids.append(incident_id)
                     logger.info(

@@ -16,6 +16,10 @@ export default defineConfig({
         target: "http://api:8000",
         changeOrigin: true,
       },
+      "/v1/traces": {
+        target: "http://otel-collector:4318",
+        changeOrigin: true,
+      },
     },
   },
   test: {

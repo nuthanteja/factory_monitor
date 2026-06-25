@@ -26,6 +26,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+from opentelemetry import trace as _otel_trace
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -34,6 +35,7 @@ from cloud.notifications.chain import ProviderChain
 from cloud.notifications.provider import NotificationKind
 
 logger = logging.getLogger("factory_monitor.notifier_worker.relay")
+_tracer = _otel_trace.get_tracer("factory_monitor.notifier_worker")
 
 _BATCH = 50
 _BACKOFF_BASE_SECONDS = 10  # backoff = base * 2^(attempts-1), capped at 1h
@@ -116,14 +118,21 @@ async def _settle_row(
 ) -> None:
     kind = NotificationKind(row.kind)
 
-    result = await provider_chain.send(
-        row.to_phone_e164,
-        kind,
-        template_name=row.template_name,
-        variables=dict(row.variables) if row.variables else None,
-        body=row.body,
-        idempotency_key=str(row.id),
-    )
+    with _tracer.start_as_current_span(
+        "notifier.send",
+        attributes={
+            "outbox_id": str(row.id),
+            **({"incident_id": str(row.incident_id)} if row.incident_id else {}),
+        },
+    ):
+        result = await provider_chain.send(
+            row.to_phone_e164,
+            kind,
+            template_name=row.template_name,
+            variables=dict(row.variables) if row.variables else None,
+            body=row.body,
+            idempotency_key=str(row.id),
+        )
 
     # Crash seam: the row is committed-SENDING and the message may already be out.
     # If we die here, the row is reclaimed after its lease and re-sent — the

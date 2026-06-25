@@ -306,3 +306,28 @@ async def test_stale_sending_row_is_reclaimed(maker: async_sessionmaker):
         ob = (await s.execute(select(Outbox).where(Outbox.id == ob_id))).scalar_one()
     assert ob.status == "SENT"
     assert ob.claimed_by is None
+
+
+# ── Test 8: notifier.send span is emitted with outbox_id attribute ─────────────
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_notifier_send_emits_span(maker: async_sessionmaker):
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from cloud.common.telemetry import reset_telemetry, setup_telemetry
+
+    exporter = InMemorySpanExporter()
+    reset_telemetry()
+    setup_telemetry("notif-test", exporter=exporter)
+
+    async with maker() as s:
+        inc_id = await _seed_incident(s)
+        ob_id = await _seed_outbox(s, inc_id)
+        await s.commit()
+
+    await run_once(maker, ProviderChain([ConsoleProvider()]))
+
+    spans = [s for s in exporter.get_finished_spans() if s.name == "notifier.send"]
+    assert spans, "expected a notifier.send span"
+    assert spans[0].attributes["outbox_id"] == str(ob_id)

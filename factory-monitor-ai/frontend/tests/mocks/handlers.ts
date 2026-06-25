@@ -54,5 +54,5 @@ export const seededCameras: Camera[] = [
 
 export const handlers = [
   http.get("/api/v1/incidents", () => HttpResponse.json(seededIncidents)),
-  http.get("/api/v1/cameras", () => HttpResponse.json(seededCameras)),
+  http.get("/api/v1/cameras", () => HttpResponse.json({ cameras: seededCameras })),
 ];

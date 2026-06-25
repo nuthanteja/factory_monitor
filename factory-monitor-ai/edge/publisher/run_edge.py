@@ -93,10 +93,11 @@ async def amain() -> None:
 
     # PER-CAMERA tracker, debouncer, and frame source so that track-id spaces
     # cannot collide across cameras (ByteTrack counters are instance-local).
-    # NOTE: asyncio.gather runs engines concurrently but does NOT parallelize the
-    # synchronous detect step — all engines share the GIL-bound event loop thread.
-    # This is acceptable for the demo; real multi-camera throughput (thread/process
-    # pool per camera or batched inference) is deferred to a later phase.
+    # NOTE: asyncio.gather runs engines concurrently.  Each engine yields with
+    # asyncio.sleep(0) once per frame so the other engines and the heartbeat task
+    # can round-robin between frames.  Cameras are still serialized during the
+    # blocking cap.read(); true per-camera parallelism (thread/executor pool or
+    # batched inference) is deferred to a later phase.
     engines = [
         VisionEngine(
             cfg,

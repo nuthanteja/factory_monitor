@@ -124,6 +124,17 @@ def test_nginx_whep_variable_proxy_pass_mediamtx_8889() -> None:
     )
 
 
+def test_nginx_whep_rewrite_strips_prefix() -> None:
+    nginx = _nginx()
+    # With a variable upstream, nginx does NOT auto-strip the location prefix —
+    # an explicit rewrite is required so /whep/cam_01/whep → /cam_01/whep.
+    assert "rewrite ^/whep/" in nginx, (
+        "frontend/nginx.conf /whep/ block must contain an explicit "
+        "'rewrite ^/whep/' directive; trailing-slash auto-strip only works "
+        "with a literal (non-variable) proxy_pass upstream"
+    )
+
+
 # ---------------------------------------------------------------------------
 # frontend/vite.config.ts — /whep proxy entry → mediamtx:8889
 # ---------------------------------------------------------------------------

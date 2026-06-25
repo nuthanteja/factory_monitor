@@ -7,7 +7,7 @@ export type Severity = "low" | "medium" | "high" | "critical";
 export interface Camera {
   id: string;
   name: string;
-  whep_url: string;
+  whep_url: string | null;
   zone_id: string | null;
 }
 
@@ -21,7 +21,8 @@ export async function getCameras(signal?: AbortSignal): Promise<Camera[]> {
   if (!res.ok) {
     throw new Error(`getCameras failed: HTTP ${res.status}`);
   }
-  return (await res.json()) as Camera[];
+  const body = (await res.json()) as { cameras: Camera[] };
+  return body.cameras;
 }
 
 export interface Incident {

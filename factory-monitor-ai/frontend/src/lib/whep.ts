@@ -59,9 +59,11 @@ export async function playWhep(opts: WhepOptions): Promise<WhepHandle> {
 
   // Resource URL discovered from the Location response header (for teardown).
   let resourceUrl: string | null = null;
+  let closed = false;
 
   const handle: WhepHandle = {
     close() {
+      closed = true;
       // Best-effort DELETE of the WHEP resource.
       if (resourceUrl) {
         void fetchImpl(resourceUrl, { method: "DELETE" }).catch(() => {
@@ -78,7 +80,9 @@ export async function playWhep(opts: WhepOptions): Promise<WhepHandle> {
     pc.addTransceiver("audio", { direction: "recvonly" });
 
     // Wire track event before offer so we don't miss an early track.
+    // Guard against the tile being torn down before the track arrives.
     pc.ontrack = (ev: RTCTrackEvent) => {
+      if (closed) return;
       video.srcObject = ev.streams[0] ?? null;
     };
 

@@ -9,7 +9,7 @@ import { playWhep, type WhepStatus } from "../lib/whep";
  * any WebRTC negotiation.
  */
 export function useWhep(
-  url: string,
+  url: string | null,
   videoRef: RefObject<HTMLVideoElement>,
 ): WhepStatus {
   const [status, setStatus] = useState<WhepStatus>("idle");
@@ -19,6 +19,12 @@ export function useWhep(
   setStatusRef.current = setStatus;
 
   useEffect(() => {
+    // Guard: null/empty url means no stream is configured for this camera.
+    if (!url) {
+      setStatusRef.current("failed");
+      return;
+    }
+
     // Guard: happy-dom and SSR environments lack RTCPeerConnection.
     if (typeof RTCPeerConnection === "undefined") {
       setStatusRef.current("failed");

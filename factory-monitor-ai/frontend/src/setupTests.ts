@@ -8,15 +8,17 @@ afterAll(() => server.close());
 
 // happy-dom media shims -------------------------------------------------------
 
-// 1. Writable srcObject (happy-dom omits it entirely)
+// 1. Writable srcObject (happy-dom omits it entirely).
+//    Per-instance storage via WeakMap so parallel multi-tile tests cannot
+//    cross-read each other's stream reference.
 if (!Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject")) {
-  let _srcObject: MediaStream | null = null;
+  const _srcObjects = new WeakMap<HTMLMediaElement, MediaStream | null>();
   Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
-    get() {
-      return _srcObject;
+    get(this: HTMLMediaElement) {
+      return _srcObjects.get(this) ?? null;
     },
-    set(v: MediaStream | null) {
-      _srcObject = v;
+    set(this: HTMLMediaElement, v: MediaStream | null) {
+      _srcObjects.set(this, v);
     },
     configurable: true,
   });

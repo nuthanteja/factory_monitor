@@ -1,0 +1,190 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  # ── EdgeHeartbeatMissing ──────────────────────────────────────────────────
+
+  # Case 1: heartbeat beats at t=0s and t=15s, then goes absent.
+  # absent_over_time(edge_heartbeat_total[30s]) fires when the 30 s window
+  # contains no sample.  After the last beat at 15 s the 30 s window clears
+  # at t=60 s; with for:0s the alert fires immediately.  We assert at 75 s.
+  # The result vector is LABEL-LESS (absent_over_time drops all source labels),
+  # so exp_labels lists only the alert-rule labels.
+  - interval: 15s
+    input_series:
+      - series: 'edge_heartbeat_total{job="edge",node="edge-01"}'
+        values: "1 2 _ _ _ _ _ _ _ _ _"
+    alert_rule_test:
+      - eval_time: 75s
+        alertname: EdgeHeartbeatMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: EdgeHeartbeatMissing
+              severity: critical
+            exp_annotations:
+              summary: "Edge heartbeat absent for more than 30 s"
+              description: "No edge_heartbeat_total samples received in the last 30 s. The edge node may be down or unreachable."
+
+  # Case 2: heartbeat fires continuously — alert must stay SILENT.
+  - interval: 15s
+    input_series:
+      - series: 'edge_heartbeat_total{job="edge",node="edge-01"}'
+        values: "1 2 3 4 5 6 7 8 9 10 11"
+    alert_rule_test:
+      - eval_time: 75s
+        alertname: EdgeHeartbeatMissing
+        exp_alerts: []
+
+  # ── CameraStale ──────────────────────────────────────────────────────────
+
+  # Case 3: cam A is frozen (value=0), cam B is live (increments with time).
+  # At eval_time=60s: time()-0=60>30 → cam A fires; time()-60≈0 → cam B silent.
+  # Only cam A (stale) should appear in exp_alerts.
+  - interval: 15s
+    input_series:
+      - series: 'cam_last_frame_seconds{job="edge",camera_id="cam_a"}'
+        values: "0 0 0 0 0 0 0"
+      - series: 'cam_last_frame_seconds{job="edge",camera_id="cam_b"}'
+        values: "0+15x6"
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: CameraStale
+        exp_alerts:
+          - exp_labels:
+              alertname: CameraStale
+              severity: warning
+              job: edge
+              camera_id: cam_a
+            exp_annotations:
+              summary: "Camera cam_a has stale frames"
+              description: "cam_last_frame_seconds for camera cam_a is more than 30 s behind wall-clock time."
+
+  # Case 4: all cameras are fresh — CameraStale must stay SILENT.
+  - interval: 15s
+    input_series:
+      - series: 'cam_last_frame_seconds{job="edge",camera_id="cam_a"}'
+        values: "0+15x6"
+      - series: 'cam_last_frame_seconds{job="edge",camera_id="cam_b"}'
+        values: "0+15x6"
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: CameraStale
+        exp_alerts: []
+
+  # ── EscalationBacklog ────────────────────────────────────────────────────
+
+  # Case 5: due_rows=60 sustained for >2m → FIRING after the for: window.
+  # DbGaugeCollector yields no source labels, so only job (from scrape target)
+  # and the alert-rule labels survive.
+  - interval: 15s
+    input_series:
+      - series: 'escalation_due_rows{job="escalation_worker"}'
+        values: "60 60 60 60 60 60 60 60 60 60 60"
+    alert_rule_test:
+      - eval_time: 150s
+        alertname: EscalationBacklog
+        exp_alerts:
+          - exp_labels:
+              alertname: EscalationBacklog
+              severity: critical
+              job: escalation_worker
+            exp_annotations:
+              summary: "Escalation backlog (60 rows) exceeds threshold"
+              description: "escalation_due_rows has been above 50 for more than 2 minutes."
+
+  # Case 6: due_rows==50 (boundary, not strictly > 50) → always SILENT.
+  - interval: 15s
+    input_series:
+      - series: 'escalation_due_rows{job="escalation_worker"}'
+        values: "50 50 50 50 50 50 50 50 50 50 50"
+    alert_rule_test:
+      - eval_time: 150s
+        alertname: EscalationBacklog
+        exp_alerts: []
+
+  # ── KafkaConsumerLagHigh ─────────────────────────────────────────────────
+
+  # Case 7: lag=1500 sustained for >5m → FIRING.
+  # max by (consumergroup) keeps only the consumergroup label.
+  - interval: 15s
+    input_series:
+      - series: 'kafka_consumergroup_lag{job="kafka-exporter",consumergroup="ingest",topic="vision.anomalies.v1",partition="0"}'
+        values: "1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500 1500"
+    alert_rule_test:
+      - eval_time: 330s
+        alertname: KafkaConsumerLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: KafkaConsumerLagHigh
+              severity: warning
+              consumergroup: ingest
+            exp_annotations:
+              summary: "Kafka consumer group ingest lag is 1500"
+              description: "Consumer group ingest has had lag above 1000 for more than 5 minutes."
+
+  # Case 8: transient spike (only one eval above threshold) → SILENT due to for:5m debounce.
+  # Spike at t=0 then drops — never sustained for 5 min.
+  - interval: 15s
+    input_series:
+      - series: 'kafka_consumergroup_lag{job="kafka-exporter",consumergroup="ingest",topic="vision.anomalies.v1",partition="0"}'
+        values: "1500 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 330s
+        alertname: KafkaConsumerLagHigh
+        exp_alerts: []
+
+  # ── WorkerFleetDown ───────────────────────────────────────────────────────
+
+  # Case 9: all worker up=0 → FIRING after for:1m.
+  # sum() drops all labels → result has no source labels.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="ingest_worker",instance="ingest_worker:9101"}'
+        values: "0 0 0 0 0 0 0 0 0"
+      - series: 'up{job="escalation_worker",instance="escalation_worker:9102"}'
+        values: "0 0 0 0 0 0 0 0 0"
+      - series: 'up{job="notifier_worker",instance="notifier_worker:9103"}'
+        values: "0 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 75s
+        alertname: WorkerFleetDown
+        exp_alerts:
+          - exp_labels:
+              alertname: WorkerFleetDown
+              severity: critical
+            exp_annotations:
+              summary: "All factory-monitor workers are down"
+              description: "sum(up{job=~\".*worker\"}) == 0 for more than 1 minute — no worker instances are scrape-reachable."
+
+  # Case 10: at least one worker up=1 → SILENT.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="ingest_worker",instance="ingest_worker:9101"}'
+        values: "1 1 1 1 1 1 1 1 1"
+      - series: 'up{job="escalation_worker",instance="escalation_worker:9102"}'
+        values: "0 0 0 0 0 0 0 0 0"
+      - series: 'up{job="notifier_worker",instance="notifier_worker:9103"}'
+        values: "0 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 75s
+        alertname: WorkerFleetDown
+        exp_alerts: []
+
+  # ── Watchdog ─────────────────────────────────────────────────────────────
+
+  # Case 11: vector(1) always fires — no input_series needed.
+  # No source labels survive; only the alert-rule labels are present.
+  - interval: 15s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 0s
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              alertname: Watchdog
+              severity: none
+            exp_annotations:
+              summary: "Watchdog — Alertmanager pipeline liveness check"
+              description: "This alert always fires. If you stop receiving it your alert pipeline is broken."

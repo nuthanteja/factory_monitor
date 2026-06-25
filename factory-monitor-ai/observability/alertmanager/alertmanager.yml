@@ -1,0 +1,33 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: webhook-sink
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: webhook-sink
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers:
+        - alertname = Watchdog
+      receiver: webhook-sink
+      repeat_interval: 1m
+
+receivers:
+  - name: webhook-sink
+    webhook_configs:
+      - url: "http://alert-sink:5001/webhook"
+        send_resolved: true
+
+inhibit_rules:
+  # Suppress warning alerts when there is a critical alert for the same alertname.
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: [alertname]

@@ -53,7 +53,9 @@ def test_helm_lint_clean() -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="docker not available on this runner")
 def test_helm_template_kubeconform_strict() -> None:
-    """helm template | kubeconform -strict must exit 0 with no errors."""
+    """The CORE chart (KEDA/CRDs off) renders to kubeconform-strict-clean manifests
+    using only the default schema (no CRD schema-location needed). The KEDA-enabled
+    render is validated separately in test_keda_manifests with the CRD schemas."""
     helm_proc = subprocess.Popen(
         [
             "docker",
@@ -65,8 +67,10 @@ def test_helm_template_kubeconform_strict() -> None:
             "template",
             "release",
             "/chart",
-            "-f",
-            "/chart/values-cloud.yaml",
+            "--set",
+            "keda.enabled=false",
+            "--set",
+            "observability.podMonitor.enabled=false",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

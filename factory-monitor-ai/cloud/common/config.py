@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     emit_heatmap: bool = False
     heatmap_min_interval_s: float = 5.0
     kafka_heatmap_topic: str = "vision.heatmap.v1"
+    kafka_heatmap_group: str = "heatmap-worker"
+    heatmap_redis_channel: str = "dashboard:heatmap"
+    heatmap_metrics_port: int = 9104
 
     # Escalation timing
     operator_grace_seconds: int = 120

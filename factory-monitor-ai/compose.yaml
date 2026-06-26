@@ -150,6 +150,27 @@ services:
       REDIS_URL: "redis://redis:6379/0"
     restart: unless-stopped
 
+  heatmap_worker:
+    build:
+      context: .
+      dockerfile: cloud/heatmap_worker/Dockerfile
+    image: factory-monitor/heatmap-worker:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://factory:factory@postgres:5432/factory"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_HEATMAP_TOPIC: "vision.heatmap.v1"
+      KAFKA_HEATMAP_GROUP: "heatmap-worker"
+      REDIS_URL: "redis://redis:6379/0"
+      HEATMAP_REDIS_CHANNEL: "dashboard:heatmap"
+    restart: unless-stopped
+
   edge:
     profiles: ["edge"]
     build:
@@ -170,6 +191,8 @@ services:
       EDGE_WEIGHTS: /app/edge/models/yolov8n.pt
       PPE_WEIGHTS_URL: ${PPE_WEIGHTS_URL:-}
       REDIS_URL: "redis://redis:6379/0"
+      KAFKA_HEATMAP_TOPIC: "vision.heatmap.v1"
+      EMIT_HEATMAP: "true"
 
   frontend:
     build:

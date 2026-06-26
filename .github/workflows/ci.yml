@@ -90,3 +90,75 @@ jobs:
         run: pip install ruff==0.15.18
       - name: Ruff check
         run: ruff check .
+
+  k8s-validate:
+    name: k8s validate (helm lint + kubeconform + k6 inspect + producer tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: factory-monitor-ai/pyproject.toml
+
+      # Install Helm
+      - uses: azure/setup-helm@v4
+        with:
+          version: "3.14.4"
+
+      # Install kubeconform — a single static binary, no apt/brew needed
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION=0.6.7
+          curl -sSfL \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      # Install k6 — official static binary release
+      - name: Install k6
+        run: |
+          K6_VERSION=0.51.0
+          curl -sSfL \
+            "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin \
+                "k6-v${K6_VERSION}-linux-amd64/k6"
+          k6 version
+
+      # 1. helm lint — catches template errors + missing required values
+      - name: helm lint
+        run: helm lint deploy/helm/factory-monitor
+
+      # 2. kubeconform — validates all rendered manifests against k8s 1.30 schema
+      #    + KEDA CRD schemas from the datreeio CRDs-catalog.
+      #    The pipeline renders with keda + observability enabled so the
+      #    ScaledObjects, PodMonitor, PrometheusRule, and dashboard ConfigMaps are
+      #    all included in the validation pass.
+      - name: kubeconform (strict, k8s 1.30 + KEDA CRDs)
+        run: |
+          helm template release deploy/helm/factory-monitor \
+            -f deploy/helm/factory-monitor/values-cloud.yaml \
+            --set keda.enabled=true \
+            --set observability.podMonitor.enabled=true \
+            --set observability.prometheusRule.enabled=true \
+            --set observability.grafanaDashboards.enabled=true \
+          | kubeconform \
+              -strict \
+              -summary \
+              -kubernetes-version 1.30.0 \
+              -schema-location default \
+              -schema-location \
+                'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+      # 3. k6 inspect — parses the script and reports its options; no cluster needed
+      - name: k6 inspect
+        run: k6 inspect load/k6/slo_loadtest.js
+
+      # 4. Producer schema tests — validate build_event() against the real
+      #    AnomalyEvent schema (extra="forbid").  No Docker/Kafka/network required.
+      - name: Install (cloud deps for producer tests)
+        run: pip install -e ".[dev,notifications]" "numpy==1.26.4" "shapely==2.0.4"
+      - name: Producer schema tests
+        run: pytest cloud/tests/test_load_producer.py -v

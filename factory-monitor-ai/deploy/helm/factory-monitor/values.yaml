@@ -59,7 +59,7 @@ redis:
 api:
   image:
     repository: factory-monitor/api
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -72,7 +72,7 @@ api:
 ingestWorker:
   image:
     repository: factory-monitor/ingest-worker
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -85,7 +85,7 @@ ingestWorker:
 escalationWorker:
   image:
     repository: factory-monitor/escalation-worker
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -98,7 +98,7 @@ escalationWorker:
 notifierWorker:
   image:
     repository: factory-monitor/notifier-worker
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -111,7 +111,7 @@ notifierWorker:
 heatmapWorker:
   image:
     repository: factory-monitor/heatmap-worker
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -124,7 +124,7 @@ heatmapWorker:
 frontend:
   image:
     repository: factory-monitor-frontend
-    tag: dev
+    tag: "0.1.0"
   replicas: 1
   resources:
     requests:
@@ -139,7 +139,7 @@ loadgen:
   enabled: false
   image:
     repository: factory-monitor/loadgen
-    tag: dev
+    tag: "0.1.0"
   topic: "vision.anomalies.v1"
   resources:
     requests:

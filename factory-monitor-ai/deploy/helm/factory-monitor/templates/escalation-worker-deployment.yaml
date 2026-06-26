@@ -19,6 +19,8 @@ spec:
         prometheus.io/port: "9102"
         prometheus.io/path: "/metrics"
     spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
       containers:
         - name: escalation-worker
           image: "{{ .Values.escalationWorker.image.repository }}:{{ .Values.escalationWorker.image.tag }}"

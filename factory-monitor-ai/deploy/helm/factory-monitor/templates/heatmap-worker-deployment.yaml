@@ -19,6 +19,8 @@ spec:
         prometheus.io/port: "9104"
         prometheus.io/path: "/metrics"
     spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
       containers:
         - name: heatmap-worker
           image: "{{ .Values.heatmapWorker.image.repository }}:{{ .Values.heatmapWorker.image.tag }}"

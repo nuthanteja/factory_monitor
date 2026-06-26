@@ -88,9 +88,14 @@ helm install factory-monitor ./deploy/helm/factory-monitor \
   -f deploy/helm/factory-monitor/values-cloud.yaml \
   --set keda.enabled=true \
   --namespace factory-monitor \
-  --create-namespace \
-  --wait
+  --create-namespace
 ```
+
+> **Do not pass `--wait`.**  With a post-install migration hook, `--wait` deadlocks:
+> helm waits for Deployments to be Ready before running the hook, but the app pods need
+> the migrated schema to become Ready.  The app pods block in the `wait-for-db`
+> initContainer until the migrate Job finishes, then start automatically.  Watch with:
+> `kubectl get pods -n factory-monitor -w`
 
 See [load/RUNBOOK.md](../load/RUNBOOK.md) for the full step-by-step live demo
 including KEDA install, kube-prometheus-stack, the k6 load test run, and the

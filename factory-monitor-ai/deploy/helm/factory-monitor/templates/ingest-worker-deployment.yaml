@@ -19,6 +19,8 @@ spec:
         prometheus.io/port: "9101"
         prometheus.io/path: "/metrics"
     spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
       containers:
         - name: ingest-worker
           image: "{{ .Values.ingestWorker.image.repository }}:{{ .Values.ingestWorker.image.tag }}"

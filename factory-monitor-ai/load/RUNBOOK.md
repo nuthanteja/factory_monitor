@@ -69,12 +69,12 @@ Build all six service images from the repo root:
 ```bash
 cd factory-monitor-ai
 
-docker build -t factory-monitor/api:0.1.0          -f cloud/api/Dockerfile              .
-docker build -t factory-monitor/ingest-worker:0.1.0 -f cloud/workers/ingest/Dockerfile   .
-docker build -t factory-monitor/escalation-worker:0.1.0 -f cloud/workers/escalation/Dockerfile .
-docker build -t factory-monitor/notifier-worker:0.1.0   -f cloud/workers/notifier/Dockerfile   .
-docker build -t factory-monitor/heatmap-worker:0.1.0    -f cloud/workers/heatmap/Dockerfile    .
-docker build -t factory-monitor-frontend:0.1.0      -f frontend/Dockerfile              .
+docker build -t factory-monitor/api:0.1.0               -f cloud/api/Dockerfile                  .
+docker build -t factory-monitor/ingest-worker:0.1.0     -f cloud/ingest_worker/Dockerfile        .
+docker build -t factory-monitor/escalation-worker:0.1.0 -f cloud/escalation_worker/Dockerfile   .
+docker build -t factory-monitor/notifier-worker:0.1.0   -f cloud/notifier_worker/Dockerfile     .
+docker build -t factory-monitor/heatmap-worker:0.1.0    -f cloud/heatmap_worker/Dockerfile      .
+docker build -t factory-monitor-frontend:0.1.0          -f frontend/Dockerfile                  .
 ```
 
 Import them into the k3d node (avoids a registry):
@@ -145,9 +145,19 @@ helm install factory-monitor ./deploy/helm/factory-monitor \
   --set observability.prometheusRule.enabled=true \
   --set observability.grafanaDashboards.enabled=true \
   --namespace factory-monitor \
-  --create-namespace \
-  --wait
+  --create-namespace
 ```
+
+> **Do not pass `--wait`.**  The post-install migration hook runs after helm considers
+> the release installed.  `--wait` would block until all Deployments are Ready _before_
+> running the hook, but the app pods need the migrated schema to become Ready — a
+> deadlock.  Instead, `helm install` returns as soon as the migrate Job completes; the
+> app pods start in Init (`wait-for-db`) and proceed automatically once the schema is
+> available.  Watch progress with:
+>
+> ```bash
+> kubectl get pods -n factory-monitor -w
+> ```
 
 Set the escalation grace window short so escalation fires within the load window:
 
@@ -185,9 +195,7 @@ helm upgrade factory-monitor ./deploy/helm/factory-monitor \
   --set observability.prometheusRule.enabled=true \
   --set observability.grafanaDashboards.enabled=true \
   --set loadgen.enabled=true \
-  --set loadgen.image.tag=0.1.0 \
-  --namespace factory-monitor \
-  --wait
+  --namespace factory-monitor
 ```
 
 Watch the loadgen Job:

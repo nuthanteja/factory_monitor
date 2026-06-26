@@ -117,8 +117,8 @@ async def _pacer(
     """
     sent = 0
     interval = 1.0 / rate_per_second if rate_per_second > 0 else 1.0
-    deadline = asyncio.get_event_loop().time() + duration
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = asyncio.get_running_loop().time() + duration
+    while asyncio.get_running_loop().time() < deadline:
         event = build_event()
         producer.send(  # type: ignore[attr-defined]
             topic,

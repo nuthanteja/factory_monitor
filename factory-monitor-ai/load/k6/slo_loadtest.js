@@ -100,7 +100,7 @@ export function wsLive() {
 
     const envelopeOk = check(msg, {
       "ws envelope has type": (m) => typeof m.type === "string" && m.type.length > 0,
-      "ws envelope has version": (m) => typeof m.version === "string",
+      "ws envelope has version": (m) => typeof m.version === "number",
       "ws envelope has seq": (m) => typeof m.seq === "number",
       "ws envelope has server_now": (m) => typeof m.server_now === "string",
       "ws envelope has data": (m) => m.data !== undefined,
@@ -189,8 +189,10 @@ export function apiWrite() {
     return;
   }
 
-  // Pick the first open incident (status OPEN).
-  const open = incidents.find((i) => i.status === "OPEN");
+  // Pick the first actionable incident (ack-able states).
+  const open = incidents.find((i) =>
+    ["AWAITING_OPERATOR", "TIER1", "TIER2"].includes(i.status)
+  );
   if (!open) {
     return;
   }

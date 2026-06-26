@@ -19,6 +19,8 @@ spec:
         prometheus.io/port: "9103"
         prometheus.io/path: "/metrics"
     spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
       containers:
         - name: notifier-worker
           image: "{{ .Values.notifierWorker.image.repository }}:{{ .Values.notifierWorker.image.tag }}"

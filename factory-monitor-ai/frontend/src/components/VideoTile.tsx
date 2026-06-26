@@ -1,5 +1,7 @@
 import { useRef } from "react";
 import { useWhep } from "../hooks/useWhep";
+import { useDetections } from "../hooks/useDetections";
+import { useDetectionOverlay } from "../hooks/useDetectionOverlay";
 import type { Camera } from "../lib/api";
 
 interface VideoTileProps {
@@ -8,7 +10,10 @@ interface VideoTileProps {
 
 export function VideoTile({ camera }: VideoTileProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const status = useWhep(camera.whep_url, videoRef);
+  const frame = useDetections(camera.id);
+  useDetectionOverlay({ videoRef, canvasRef, frame, active: status === "live" });
 
   return (
     <div
@@ -21,8 +26,21 @@ export function VideoTile({ camera }: VideoTileProps): JSX.Element {
         autoPlay
         muted
         playsInline
-        style={{ width: "100%", height: "100%", display: "block" }}
+        style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
         data-testid={`video-${camera.id}`}
+      />
+
+      {/* Detection overlay canvas — sits above video, below fallback/badge */}
+      <canvas
+        ref={canvasRef}
+        data-testid={`detection-overlay-${camera.id}`}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+        }}
       />
 
       {/* Fallback overlay — shown until the stream goes live */}

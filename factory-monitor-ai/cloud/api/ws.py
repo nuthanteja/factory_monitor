@@ -101,6 +101,28 @@ async def _broadcast_loop(
             next_timer += timer_s
 
 
+@ws_router.websocket("/ws/detections/{camera_id}")
+async def ws_detections(ws: WebSocket, camera_id: str) -> None:
+    """Stream per-frame detection boxes for one camera to the browser.
+
+    The camera is identified by the path parameter; there is no subscribe
+    message — the client connects and receives frames immediately.
+    Wire format: {"type": "detection.frame", "data": {…}} (flat, no seq/version).
+    """
+    from cloud.common.ws.detection_hub import DetectionHub
+
+    hub: DetectionHub = ws.app.state.detection_hub  # type: ignore[attr-defined]
+    await ws.accept()
+    await hub.add(camera_id, ws)
+    try:
+        while True:
+            await ws.receive_text()  # keepalive / detect client disconnect
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await hub.remove(camera_id, ws)
+
+
 @ws_router.websocket("/ws/live")
 async def ws_live(ws: WebSocket) -> None:
     mgr: ConnectionManager = ws.app.state.ws_manager

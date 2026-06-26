@@ -1,0 +1,52 @@
+# kube-prometheus-stack values for factory-monitor on k3s.
+# Install:
+#   helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     -n observability --create-namespace \
+#     -f deploy/k8s/observability/kube-prometheus-stack-values.yaml
+
+grafana:
+  # Sidecar picks up ConfigMaps labeled grafana_dashboard=1 from any namespace.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+  # Tempo + Loki datasources (carried from 3b.3 observability stack).
+  additionalDataSources:
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      url: http://tempo.observability.svc:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          filterByTraceID: true
+    - name: Loki
+      uid: loki
+      type: loki
+      url: http://loki.observability.svc:3100
+      jsonData:
+        derivedFields:
+          - name: trace_id
+            matcherRegex: '"trace_id":"(\w+)"'
+            url: "${__value.raw}"
+            datasourceUid: tempo
+
+prometheus:
+  prometheusSpec:
+    # Pick up PodMonitors from any namespace.
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    # Pick up ServiceMonitors from any namespace.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    # Pick up PrometheusRules from any namespace.
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}

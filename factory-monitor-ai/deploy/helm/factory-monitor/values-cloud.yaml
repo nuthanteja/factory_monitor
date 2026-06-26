@@ -21,3 +21,15 @@ heatmapWorker:
 
 frontend:
   replicas: 1
+
+keda:
+  enabled: true
+  prometheusAddress: http://kube-prometheus-stack-prometheus.observability.svc:9090
+
+observability:
+  podMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+  grafanaDashboards:
+    enabled: true

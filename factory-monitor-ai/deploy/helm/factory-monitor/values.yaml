@@ -1,6 +1,20 @@
 image:
   pullPolicy: IfNotPresent
 
+# ── KEDA autoscaling ─────────────────────────────────────────────────────────
+keda:
+  enabled: false
+  prometheusAddress: http://kube-prometheus-stack-prometheus.observability.svc:9090
+
+# ── On-cluster observability ─────────────────────────────────────────────────
+observability:
+  podMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafanaDashboards:
+    enabled: false
+
 # ── Infra ────────────────────────────────────────────────────────────────────
 postgres:
   image:

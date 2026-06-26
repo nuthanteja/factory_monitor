@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Detection WebSocket relay (cloud)
     detections_ws_enabled: bool = True     # gate: set False in tests to skip Redis/hub startup
 
+    # Heatmap WebSocket relay (Phase 4b, Task 3)
+    heatmap_ws_enabled: bool = True        # gate: set False in tests to skip hub startup
+
     # Heatmap density emit (Phase 4b)
     emit_heatmap: bool = False
     heatmap_min_interval_s: float = 5.0

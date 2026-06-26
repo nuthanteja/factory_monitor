@@ -15,6 +15,7 @@ from cloud.common.redis_client import close_redis, get_redis
 from cloud.common.seed_cameras import seed_cameras
 from cloud.common.ws.detection_hub import DetectionHub
 from cloud.common.ws.fanout import start_ws_fanout, stop_ws_fanout
+from cloud.common.ws.heatmap_hub import HeatmapHub
 from cloud.common.ws.manager import ConnectionManager
 
 
@@ -35,13 +36,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # noqa: ANN001
         # --- startup ---
+        _redis_obtained = False
         if _settings.ws_fanout_enabled:
             app.state.ws_redis = get_redis(_settings)
+            _redis_obtained = True
             await start_ws_fanout(app)
         if _settings.detections_ws_enabled:
             # Reuse the same redis client as the fanout (or create one if fanout is off).
             redis = getattr(app.state, "ws_redis", None) or get_redis(_settings)
+            if not _redis_obtained:
+                _redis_obtained = True
             app.state.detection_hub = DetectionHub(redis)
+        if _settings.heatmap_ws_enabled:
+            redis = getattr(app.state, "ws_redis", None) or get_redis(_settings)
+            if not _redis_obtained:
+                _redis_obtained = True
+            app.state.heatmap_hub = HeatmapHub(
+                redis, channel=_settings.heatmap_redis_channel
+            )
         if _settings.seed_cameras_enabled:
             maker = getattr(app.state, "ws_session_maker", None)
             if maker is not None:
@@ -53,8 +65,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             hub: DetectionHub | None = getattr(app.state, "detection_hub", None)
             if hub is not None:
                 await hub.close()
+        if _settings.heatmap_ws_enabled and hasattr(app.state, "heatmap_hub"):
+            await app.state.heatmap_hub.close()
         if _settings.ws_fanout_enabled:
             await stop_ws_fanout(app)
+        if _redis_obtained:
             await close_redis()
 
     app = FastAPI(title="Factory Monitor API", version="1.0.0", lifespan=lifespan)

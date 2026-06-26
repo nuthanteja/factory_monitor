@@ -35,6 +35,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/whep/, ""),
       },
+      "/ws/heatmap": {
+        target: "http://api:8000",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   test: {

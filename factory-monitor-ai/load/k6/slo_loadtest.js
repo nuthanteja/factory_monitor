@@ -20,7 +20,9 @@
 
 import { check, sleep } from "k6";
 import http from "k6/http";
-import { WebSocket } from "k6/websockets";
+// The WebSocket-API module: `k6/experimental/websockets` is the path available in
+// the pinned k6 (it graduated to `k6/websockets` only in newer k6 builds).
+import { WebSocket } from "k6/experimental/websockets";
 import { Counter, Trend } from "k6/metrics";
 
 // ── Custom metrics ────────────────────────────────────────────────────────────

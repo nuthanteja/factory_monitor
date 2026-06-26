@@ -17,9 +17,10 @@ WS_PROTOCOL_VERSION = 1
 
 
 class WsType(str, PyEnum):
-    # Phase-2b subset. detection.frame / heatmap.tick / whatsapp.message /
-    # system.replay_mode are deferred to Phase 4 (do NOT add here yet).
+    # Phase-2b subset. detection.frame / whatsapp.message /
+    # system.replay_mode are deferred (do NOT add here yet).
     SNAPSHOT = "snapshot"
+    HEATMAP_TICK = "heatmap.tick"
     INCIDENT_CREATED = "incident.created"
     INCIDENT_UPDATED = "incident.updated"
     INCIDENT_TIER_ADVANCED = "incident.tier_advanced"

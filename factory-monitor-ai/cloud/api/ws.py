@@ -123,6 +123,23 @@ async def ws_detections(ws: WebSocket, camera_id: str) -> None:
         await hub.remove(camera_id, ws)
 
 
+@ws_router.websocket("/ws/heatmap")
+async def ws_heatmap(ws: WebSocket) -> None:
+    """Live heatmap tick relay — fan-out of dashboard:heatmap Redis channel."""
+    from cloud.common.ws.heatmap_hub import HeatmapHub
+
+    hub: HeatmapHub = ws.app.state.heatmap_hub
+    await ws.accept()
+    await hub.add(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await hub.remove(ws)
+
+
 @ws_router.websocket("/ws/live")
 async def ws_live(ws: WebSocket) -> None:
     mgr: ConnectionManager = ws.app.state.ws_manager

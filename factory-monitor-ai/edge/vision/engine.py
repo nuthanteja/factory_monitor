@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 from opentelemetry import trace as _otel_trace
@@ -46,6 +46,10 @@ class Tracker(Protocol):
 class Detector(Protocol):
     def detect(self, frame: np.ndarray) -> list[Detection]:
         ...
+
+
+class HeatmapSink(Protocol):
+    def publish(self, camera_id: str, payload: dict[str, Any]) -> None: ...
 
 
 def _bbox_anchor(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
@@ -102,6 +106,9 @@ class VisionEngine:
         emit_detections: bool = False,
         detection_sink: DetectionSink | None = None,
         detection_max_fps: float = 10.0,
+        emit_heatmap: bool = False,
+        heatmap_sink: HeatmapSink | None = None,
+        heatmap_min_interval_s: float = 5.0,
         monotonic: Callable[[], float] | None = None,
     ) -> None:
         self.cfg = cfg
@@ -119,6 +126,10 @@ class VisionEngine:
         self._monotonic = monotonic or time.monotonic
         self._last_emit_mono: float = 0.0
         self._det_seq: int = 0
+        self.emit_heatmap = emit_heatmap
+        self.heatmap_sink = heatmap_sink
+        self.heatmap_min_interval_s = heatmap_min_interval_s
+        self._last_heatmap_mono: float = -heatmap_min_interval_s
 
     async def _emit(self, key: str, ev: AnomalyEvent) -> None:
         result = self.publish(key, ev)
@@ -164,6 +175,26 @@ class VisionEngine:
                     }
                     self.detection_sink.publish(self.cfg.camera_id, payload)
             # -----------------------------------------------------------------
+            if self.emit_heatmap and self.heatmap_sink is not None:
+                now_mono = self._monotonic()
+                if now_mono - self._last_heatmap_mono >= self.heatmap_min_interval_s:
+                    self._last_heatmap_mono = now_mono
+                    counts: dict[str, int] = {z.zone_id: 0 for z in self.cfg.zones}
+                    for _raw_id, det in tracked:
+                        if det.object_class != "person":
+                            continue
+                        anchor = _bbox_anchor(det.bbox)
+                        for zone in self.cfg.zones:
+                            if point_in_polygon(anchor, zone.polygon):
+                                counts[zone.zone_id] += 1
+                    payload: dict[str, Any] = {
+                        "camera_id": self.cfg.camera_id,
+                        "ts": self.clock().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                        "cells": [
+                            {"zone_id": zid, "count": c} for zid, c in counts.items()
+                        ],
+                    }
+                    self.heatmap_sink.publish(self.cfg.camera_id, payload)
             for raw_id, det in tracked:
                 if det.object_class != "person":
                     continue

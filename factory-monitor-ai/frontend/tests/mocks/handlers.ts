@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { Camera, IncidentsResponse } from "../../src/lib/api";
+import type { Camera, IncidentsResponse, Zone } from "../../src/lib/api";
 
 export const seededIncidents: IncidentsResponse = {
   incidents: [
@@ -52,7 +52,62 @@ export const seededCameras: Camera[] = [
   },
 ];
 
+export const seededZones: Zone[] = [
+  {
+    id: "zone_weld_bay",
+    camera_id: "cam_01",
+    name: "Weld Bay",
+    polygon: [
+      [10, 10],
+      [90, 10],
+      [90, 90],
+      [10, 90],
+    ],
+  },
+  {
+    id: "zone_entry",
+    camera_id: "cam_01",
+    name: "Entry",
+    polygon: [
+      [100, 10],
+      [180, 10],
+      [180, 90],
+      [100, 90],
+    ],
+  },
+  {
+    id: "zone_assembly",
+    camera_id: "cam_02",
+    name: "Assembly",
+    polygon: [
+      [10, 10],
+      [90, 10],
+      [90, 90],
+      [10, 90],
+    ],
+  },
+];
+
+export const seededHeatmapResponse = {
+  cameras: [
+    {
+      camera_id: "cam_01",
+      cells: [
+        { zone_id: "zone_weld_bay", count: 3, ts: 1719050000 },
+        { zone_id: "zone_entry", count: 0, ts: 1719050000 },
+      ],
+    },
+    {
+      camera_id: "cam_02",
+      cells: [{ zone_id: "zone_assembly", count: 5, ts: 1719050000 }],
+    },
+  ],
+  meta: {},
+};
+
 export const handlers = [
   http.get("/api/v1/incidents", () => HttpResponse.json(seededIncidents)),
   http.get("/api/v1/cameras", () => HttpResponse.json({ cameras: seededCameras })),
+  http.get("/api/v1/zones", () => HttpResponse.json({ zones: seededZones })),
+  http.get("/api/v1/heatmap", () => HttpResponse.json(seededHeatmapResponse)),
 ];

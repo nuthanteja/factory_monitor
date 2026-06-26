@@ -16,11 +16,12 @@ def test_wstype_phase2b_subset_values():
     assert WsType.INCIDENT_RESOLVED.value == "incident.resolved"
     assert WsType.TIMER_SNAPSHOT.value == "timer.snapshot"
     assert WsType.SYSTEM_HEARTBEAT.value == "system.heartbeat"
-    # Phase-4 types are deliberately absent in the 2b subset.
+    # Phase-4b heatmap type is now included.
     assert {t.value for t in WsType} == {
         "snapshot", "incident.created", "incident.updated",
         "incident.tier_advanced", "incident.resolved",
         "timer.snapshot", "system.heartbeat",
+        "heatmap.tick",
     }
 
 

@@ -69,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.heatmap_hub.close()
         if _settings.ws_fanout_enabled:
             await stop_ws_fanout(app)
+        # Close the shared redis client whenever it was obtained (fanout, detection, or heatmap).
         if _redis_obtained:
             await close_redis()
 

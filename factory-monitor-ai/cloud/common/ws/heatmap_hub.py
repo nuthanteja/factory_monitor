@@ -23,6 +23,7 @@ class HeatmapHub:
         self._sockets: set[WebSocket] = set()
         self._relay_task: asyncio.Task | None = None
         self._pubsub: object | None = None
+        self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -30,19 +31,22 @@ class HeatmapHub:
 
     async def add(self, ws: WebSocket) -> None:
         """Register a WebSocket.  Starts the relay on the first add."""
-        self._sockets.add(ws)
-        if self._relay_task is None or self._relay_task.done():
-            await self._start_relay()
+        async with self._lock:
+            self._sockets.add(ws)
+            if self._relay_task is None or self._relay_task.done():
+                await self._start_relay()
 
     async def remove(self, ws: WebSocket) -> None:
         """Deregister a WebSocket.  Stops the relay when the set empties."""
-        self._sockets.discard(ws)
-        if not self._sockets:
-            await self._stop_relay()
+        async with self._lock:
+            self._sockets.discard(ws)
+            if not self._sockets:
+                await self._stop_relay()
 
     async def close(self) -> None:
         """Unconditional shutdown — cancel relay and aclose pubsub."""
-        await self._stop_relay()
+        async with self._lock:
+            await self._stop_relay()
 
     # ------------------------------------------------------------------
     # Internal

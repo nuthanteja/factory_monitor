@@ -69,6 +69,26 @@ class _FakeRedis:
         return self._pubsub
 
 
+class _CountingFakeRedis:
+    """Like _FakeRedis but counts how many pubsub() calls are made (race detector)."""
+
+    def __init__(self) -> None:
+        self.pubsub_call_count = 0
+        self._pubsub = _RacyFakePubsub()
+
+    def pubsub(self) -> _RacyFakePubsub:
+        self.pubsub_call_count += 1
+        return self._pubsub
+
+
+class _RacyFakePubsub(_FakePubsub):
+    """FakePubsub that yields to the event loop during subscribe to open the race window."""
+
+    async def subscribe(self, channel: str) -> None:
+        await asyncio.sleep(0)  # yield — lets a concurrent add() slip through without a lock
+        self.subscribed_channels.append(channel)
+
+
 class _FakeWebSocket:
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -225,3 +245,34 @@ async def test_close_cancels_relay_even_with_active_sockets() -> None:
 
     assert task is not None
     assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_add_starts_relay_exactly_once() -> None:
+    """Two concurrent add() calls from an empty hub must start the relay ONCE.
+
+    The _RacyFakePubsub.subscribe() yields inside (await asyncio.sleep(0)) to open
+    the race window that the asyncio.Lock must close.  Without the lock the second
+    add() would observe _relay_task is None and call _start_relay() a second time,
+    resulting in pubsub_call_count == 2 and two relay tasks.
+    """
+    redis = _CountingFakeRedis()
+    hub = HeatmapHub(redis, channel=CHANNEL)
+    ws1 = _FakeWebSocket()
+    ws2 = _FakeWebSocket()
+
+    # Fire both adds concurrently — the race window is inside subscribe().
+    await asyncio.gather(hub.add(ws1), hub.add(ws2))
+
+    # pubsub() must have been called exactly once (one subscription, one relay task).
+    assert redis.pubsub_call_count == 1, (
+        f"Expected 1 pubsub() call but got {redis.pubsub_call_count} — "
+        "concurrent add() is starting the relay more than once (add-race)"
+    )
+    assert hub._relay_task is not None
+    assert not hub._relay_task.done()
+    # Both sockets must be registered.
+    assert ws1 in hub._sockets
+    assert ws2 in hub._sockets
+
+    await hub.close()

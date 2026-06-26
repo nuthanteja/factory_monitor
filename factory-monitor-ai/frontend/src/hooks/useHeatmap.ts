@@ -44,6 +44,9 @@ export function useHeatmap(opts: UseHeatmapOptions = {}): UseHeatmapResult {
     staleTime: Infinity, // counts persist; WS keeps them live
   });
 
+  // Keep the latest REST seed in a ref so the WS effect doesn't re-run when it arrives.
+  const restSeedRef = useRef<HeatCell[] | undefined>(undefined);
+
   // Map of "camera_id::zone_id" → HeatCell — latest-wins merge.
   const cellMapRef = useRef<Map<string, HeatCell>>(new Map());
   // Whether we've received at least one WS tick (so we stop returning REST data).
@@ -51,6 +54,11 @@ export function useHeatmap(opts: UseHeatmapOptions = {}): UseHeatmapResult {
 
   const [liveCells, setLiveCells] = useState<HeatCell[]>([]);
   const [connected, setConnected] = useState(false);
+
+  // Sync REST data into the ref without triggering the WS connection effect.
+  useEffect(() => {
+    restSeedRef.current = restQuery.data;
+  }, [restQuery.data]);
 
   const attemptRef = useRef(0);
   const closedByUsRef = useRef(false);
@@ -97,8 +105,8 @@ export function useHeatmap(opts: UseHeatmapOptions = {}): UseHeatmapResult {
 
         // Seed the map with REST data on first tick (so camera-A data survives
         // a camera-B tick that doesn't mention camera-A).
-        if (!wsReadyRef.current && restQuery.data) {
-          for (const cell of restQuery.data) {
+        if (!wsReadyRef.current && restSeedRef.current) {
+          for (const cell of restSeedRef.current) {
             cellMapRef.current.set(`${cell.camera_id}::${cell.zone_id}`, cell);
           }
         }
@@ -169,7 +177,7 @@ export function useHeatmap(opts: UseHeatmapOptions = {}): UseHeatmapResult {
       }
       socketRef.current = null;
     };
-  }, [wsUrl, wsFactory, baseBackoffMs, maxBackoffMs, restQuery.data]);
+  }, [wsUrl, wsFactory, baseBackoffMs, maxBackoffMs]);
 
   // Before any WS tick: return REST seed. After first tick: return live cells.
   const cells = wsReadyRef.current ? liveCells : (restQuery.data ?? []);

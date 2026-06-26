@@ -3,8 +3,9 @@ import { useLiveIncidents, type WsFactory } from "./hooks/useLiveIncidents";
 import { useIncidentActions } from "./hooks/useIncidentActions";
 import { LiveIncidentCard } from "./components/LiveIncidentCard";
 import { CameraWall } from "./components/CameraWall";
+import { Heatmap } from "./components/Heatmap";
 
-type View = "incidents" | "cameras";
+type View = "incidents" | "cameras" | "heatmap";
 
 export default function App({
   wsFactory,
@@ -37,6 +38,14 @@ export default function App({
           data-testid="tab-cameras"
         >
           Cameras
+        </button>
+        <button
+          role="tab"
+          aria-selected={view === "heatmap"}
+          onClick={() => setView("heatmap")}
+          data-testid="tab-heatmap"
+        >
+          Heatmap
         </button>
       </div>
 
@@ -72,6 +81,8 @@ export default function App({
       )}
 
       {view === "cameras" && <CameraWall />}
+
+      {view === "heatmap" && <Heatmap />}
     </main>
   );
 }

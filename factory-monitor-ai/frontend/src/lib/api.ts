@@ -1,3 +1,6 @@
+import type { Zone, HeatCell } from "./heatmapContract";
+export type { Zone, HeatCell };
+
 export type Severity = "low" | "medium" | "high" | "critical";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +90,53 @@ export async function acknowledgeIncident(
     throw new Error(`acknowledgeIncident failed: HTTP ${res.status}`);
   }
   return (await res.json()) as ActionResponse;
+}
+
+// ---------------------------------------------------------------------------
+// Zones
+// ---------------------------------------------------------------------------
+
+const ZONES_URL = "/api/v1/zones";
+
+export async function getZones(signal?: AbortSignal): Promise<Zone[]> {
+  const res = await fetch(ZONES_URL, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`getZones failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as { zones: Zone[] };
+  return body.zones;
+}
+
+// ---------------------------------------------------------------------------
+// Heatmap (REST seed — returns a flat HeatCell[] with camera_id attached)
+// ---------------------------------------------------------------------------
+
+const HEATMAP_URL = "/api/v1/heatmap";
+
+type HeatmapApiResponse = {
+  cameras: { camera_id: string; cells: { zone_id: string; count: number; ts: number | string }[] }[];
+  meta: Record<string, unknown>;
+};
+
+export async function getHeatmap(signal?: AbortSignal): Promise<HeatCell[]> {
+  const res = await fetch(HEATMAP_URL, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`getHeatmap failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as HeatmapApiResponse;
+  const cells: HeatCell[] = [];
+  for (const cam of body.cameras) {
+    for (const cell of cam.cells) {
+      cells.push({ camera_id: cam.camera_id, zone_id: cell.zone_id, count: cell.count, ts: cell.ts });
+    }
+  }
+  return cells;
 }
 
 export async function resolveIncident(

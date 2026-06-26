@@ -133,3 +133,18 @@ frontend:
     limits:
       cpu: 200m
       memory: 128Mi
+
+# ── Load generator (disabled by default) ────────────────────────────────────
+loadgen:
+  enabled: false
+  image:
+    repository: factory-monitor/loadgen
+    tag: dev
+  topic: "vision.anomalies.v1"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

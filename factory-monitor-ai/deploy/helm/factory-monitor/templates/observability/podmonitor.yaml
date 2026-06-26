@@ -1,0 +1,56 @@
+{{- if .Values.observability.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-ingest-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest-worker
+spec:
+  selector:
+    matchLabels:
+      app: ingest-worker
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      relabelings:
+        - targetLabel: job
+          replacement: ingest_worker
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-escalation-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: escalation-worker
+spec:
+  selector:
+    matchLabels:
+      app: escalation-worker
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      relabelings:
+        - targetLabel: job
+          replacement: escalation_worker
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-notifier-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notifier-worker
+spec:
+  selector:
+    matchLabels:
+      app: notifier-worker
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      relabelings:
+        - targetLabel: job
+          replacement: notifier_worker
+{{- end }}

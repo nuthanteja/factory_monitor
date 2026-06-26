@@ -1,0 +1,39 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: escalation-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: escalation-worker
+spec:
+  scaleTargetRef:
+    name: escalation-worker
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.keda.prometheusAddress }}
+        query: max(escalation_due_rows)
+        threshold: "50"
+        activationThreshold: "1"
+        ignoreNullValues: "false"
+{{- end }}

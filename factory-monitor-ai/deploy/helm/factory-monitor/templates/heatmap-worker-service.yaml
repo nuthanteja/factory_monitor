@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: heatmap-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: heatmap-worker
+spec:
+  clusterIP: None
+  selector:
+    app: heatmap-worker
+  ports:
+    - name: metrics
+      port: 9104
+      targetPort: 9104

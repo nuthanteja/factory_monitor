@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-kafka-init
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kafka-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  kafka-init.sh: |
+    {{ .Files.Get "files/kafka-init.sh" | nindent 4 }}

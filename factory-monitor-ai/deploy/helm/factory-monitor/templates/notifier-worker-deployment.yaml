@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifier-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notifier-worker
+spec:
+  replicas: {{ .Values.notifierWorker.replicas }}
+  selector:
+    matchLabels:
+      app: notifier-worker
+  template:
+    metadata:
+      labels:
+        app: notifier-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9103"
+        prometheus.io/path: "/metrics"
+    spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
+      containers:
+        - name: notifier-worker
+          image: "{{ .Values.notifierWorker.image.repository }}:{{ .Values.notifierWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: 9103
+          envFrom:
+            - configMapRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+            - secretRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+          readinessProbe:
+            tcpSocket:
+              port: 9103
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.notifierWorker.resources | nindent 12 }}

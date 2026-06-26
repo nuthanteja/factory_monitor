@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: escalation-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: escalation-worker
+spec:
+  replicas: {{ .Values.escalationWorker.replicas }}
+  selector:
+    matchLabels:
+      app: escalation-worker
+  template:
+    metadata:
+      labels:
+        app: escalation-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9102"
+        prometheus.io/path: "/metrics"
+    spec:
+      initContainers:
+        {{- include "factory-monitor.waitForDb" . | nindent 8 }}
+      containers:
+        - name: escalation-worker
+          image: "{{ .Values.escalationWorker.image.repository }}:{{ .Values.escalationWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: 9102
+          envFrom:
+            - configMapRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+            - secretRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+          readinessProbe:
+            tcpSocket:
+              port: 9102
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.escalationWorker.resources | nindent 12 }}

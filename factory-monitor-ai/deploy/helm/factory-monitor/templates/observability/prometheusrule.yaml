@@ -1,0 +1,67 @@
+{{- if .Values.observability.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-alerts
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: factory_monitor_alerts
+      rules:
+        - alert: EdgeHeartbeatMissing
+          expr: absent_over_time(edge_heartbeat_total[30s])
+          for: 0s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Edge heartbeat absent for more than 30 s"
+            description: "No edge_heartbeat_total samples received in the last 30 s. The edge node may be down or unreachable."
+
+        - alert: CameraStale
+          expr: time() - cam_last_frame_seconds > 30
+          for: 0s
+          labels:
+            severity: warning
+          annotations:
+            summary: "Camera {{ `{{ $labels.camera_id }}` }} has stale frames"
+            description: "cam_last_frame_seconds for camera {{ `{{ $labels.camera_id }}` }} is more than 30 s behind wall-clock time."
+
+        - alert: EscalationBacklog
+          expr: escalation_due_rows > 50
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Escalation backlog ({{ `{{ $value }}` }} rows) exceeds threshold"
+            description: "escalation_due_rows has been above 50 for more than 2 minutes."
+
+        - alert: KafkaConsumerLagHigh
+          expr: max by (consumergroup) (kafka_consumergroup_lag) > 1000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka consumer group {{ `{{ $labels.consumergroup }}` }} lag is {{ `{{ $value }}` }}"
+            description: "Consumer group {{ `{{ $labels.consumergroup }}` }} has had lag above 1000 for more than 5 minutes."
+
+        - alert: WorkerFleetDown
+          expr: sum(up{job=~".*worker"}) == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "All factory-monitor workers are down"
+            description: "sum(up{job=~\".*worker\"}) == 0 for more than 1 minute — no worker instances are scrape-reachable."
+
+    - name: factory_monitor_watchdog
+      rules:
+        - alert: Watchdog
+          expr: vector(1)
+          for: 0s
+          labels:
+            severity: none
+          annotations:
+            summary: "Watchdog — Alertmanager pipeline liveness check"
+            description: "This alert always fires. If you stop receiving it your alert pipeline is broken."
+{{- end }}

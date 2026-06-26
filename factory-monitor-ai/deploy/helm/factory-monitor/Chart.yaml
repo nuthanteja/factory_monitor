@@ -1,0 +1,6 @@
+apiVersion: v2
+name: factory-monitor
+description: Factory Monitor event pipeline — infra (postgres/kafka/redis) + workers + API on k3s
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

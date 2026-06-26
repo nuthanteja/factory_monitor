@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-frontend
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  selector:
+    app: {{ include "factory-monitor.fullname" . }}-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

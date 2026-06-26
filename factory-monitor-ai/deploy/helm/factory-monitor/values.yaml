@@ -1,0 +1,150 @@
+image:
+  pullPolicy: IfNotPresent
+
+# ── KEDA autoscaling ─────────────────────────────────────────────────────────
+keda:
+  enabled: false
+  prometheusAddress: http://kube-prometheus-stack-prometheus.observability.svc:9090
+
+# ── On-cluster observability ─────────────────────────────────────────────────
+observability:
+  podMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  grafanaDashboards:
+    enabled: false
+
+# ── Infra ────────────────────────────────────────────────────────────────────
+postgres:
+  image:
+    repository: postgres
+    tag: "16"
+  persistence:
+    storageClass: local-path
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+kafka:
+  image:
+    repository: apache/kafka
+    tag: "3.7.0"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── App services ─────────────────────────────────────────────────────────────
+api:
+  image:
+    repository: factory-monitor/api
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingestWorker:
+  image:
+    repository: factory-monitor/ingest-worker
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+escalationWorker:
+  image:
+    repository: factory-monitor/escalation-worker
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+notifierWorker:
+  image:
+    repository: factory-monitor/notifier-worker
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+heatmapWorker:
+  image:
+    repository: factory-monitor/heatmap-worker
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+frontend:
+  image:
+    repository: factory-monitor-frontend
+    tag: "0.1.0"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── Load generator (disabled by default) ────────────────────────────────────
+loadgen:
+  enabled: false
+  image:
+    repository: factory-monitor/loadgen
+    tag: "0.1.0"
+  topic: "vision.anomalies.v1"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

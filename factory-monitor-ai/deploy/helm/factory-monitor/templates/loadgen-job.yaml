@@ -1,0 +1,50 @@
+{{- if .Values.loadgen.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "factory-monitor.fullname" . }}-loadgen
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: loadgen
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: {{ include "factory-monitor.fullname" . }}-loadgen
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-kafka
+          image: "{{ .Values.kafka.image.repository }}:{{ .Values.kafka.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until /opt/kafka/bin/kafka-broker-api-versions.sh \
+                --bootstrap-server kafka:9092 >/dev/null 2>&1; do
+                echo "waiting for kafka..."
+                sleep 5
+              done
+      containers:
+        - name: loadgen
+          image: "{{ .Values.loadgen.image.repository }}:{{ .Values.loadgen.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: KAFKA_ANOMALIES_TOPIC
+              value: {{ .Values.loadgen.topic | default "vision.anomalies.v1" | quote }}
+          resources:
+            requests:
+              cpu: {{ .Values.loadgen.resources.requests.cpu | default "200m" }}
+              memory: {{ .Values.loadgen.resources.requests.memory | default "128Mi" }}
+            limits:
+              cpu: {{ .Values.loadgen.resources.limits.cpu | default "500m" }}
+              memory: {{ .Values.loadgen.resources.limits.memory | default "256Mi" }}
+{{- end }}

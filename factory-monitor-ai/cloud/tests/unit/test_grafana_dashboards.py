@@ -51,6 +51,7 @@ def _build_allowed_metrics() -> set[str]:
         "pg_stat_database_numbackends",
         "redis_memory_used_bytes",
         "redis_connected_clients",
+        "kube_horizontalpodautoscaler_status_current_replicas",
     })
     return allowed
 
@@ -68,6 +69,7 @@ _PROMQL_KEYWORDS = frozenset({
     # result / refId labels
     "consumergroup", "topic", "instance", "job", "datname", "provider",
     "tier", "result", "outcome", "camera_id", "node", "channel", "type",
+    "horizontalpodautoscaler",
 })
 
 _TOKEN_RE = re.compile(r"\b([a-z_][a-z0-9_]*)\b(?!\s*\()")

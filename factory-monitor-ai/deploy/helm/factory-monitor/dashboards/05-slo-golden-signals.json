@@ -1,0 +1,102 @@
+{
+  "uid": "fm-slo-golden-signals",
+  "title": "SLO & Golden Signals",
+  "schemaVersion": 39,
+  "tags": ["factory-monitor"],
+  "timezone": "browser",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Latency: event→incident p95 (SLO<2s)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(ingest_event_to_incident_latency_seconds_bucket{job=\"ingest_worker\"}[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 2}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Traffic",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(ingest_events_consumed_total[1m]))",
+          "legendFormat": "Consumed"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(escalations_fired_total[1m]))",
+          "legendFormat": "Escalations"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(notifier_sends_total[1m]))",
+          "legendFormat": "Sends"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Errors",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(notifier_sends_total{result!=\"sent\"}[5m])) / clamp_min(sum(rate(notifier_sends_total[5m])), 1)",
+          "legendFormat": "error rate"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (provider) (rate(provider_send_failures_total[5m]))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Saturation",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(escalation_due_rows)",
+          "legendFormat": "escalation backlog"
+        },
+        {
+          "refId": "B",
+          "expr": "max(outbox_pending)",
+          "legendFormat": "outbox pending"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(kafka_consumergroup_lag)",
+          "legendFormat": "kafka lag"
+        }
+      ]
+    }
+  ]
+}

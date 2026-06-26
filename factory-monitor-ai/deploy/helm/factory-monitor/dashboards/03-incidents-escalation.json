@@ -1,0 +1,78 @@
+{
+  "uid": "fm-incidents-escalation",
+  "title": "Incidents & Escalation",
+  "schemaVersion": 39,
+  "tags": ["factory-monitor"],
+  "timezone": "browser",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Escalations fired by tier",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tier, result) (rate(escalations_fired_total[5m]))",
+          "legendFormat": "{{tier}}/{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Escalation backlog",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(escalation_due_rows)",
+          "legendFormat": "backlog"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "orange", "value": 25},
+              {"color": "red", "value": 50}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Fire lag p95 by tier",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, tier) (rate(escalation_fire_lag_seconds_bucket[5m])))",
+          "legendFormat": "{{tier}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Outbox pending",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outbox_pending)",
+          "legendFormat": "pending"
+        }
+      ]
+    }
+  ]
+}

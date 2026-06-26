@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: escalation-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: escalation-worker
+spec:
+  clusterIP: None
+  selector:
+    app: escalation-worker
+  ports:
+    - name: metrics
+      port: 9102
+      targetPort: 9102

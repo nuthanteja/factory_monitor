@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heatmap-worker
+  labels:
+    {{- include "factory-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: heatmap-worker
+spec:
+  replicas: {{ .Values.heatmapWorker.replicas }}
+  selector:
+    matchLabels:
+      app: heatmap-worker
+  template:
+    metadata:
+      labels:
+        app: heatmap-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9104"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: heatmap-worker
+          image: "{{ .Values.heatmapWorker.image.repository }}:{{ .Values.heatmapWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: 9104
+          envFrom:
+            - configMapRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+            - secretRef:
+                name: {{ include "factory-monitor.fullname" . }}-app
+          readinessProbe:
+            tcpSocket:
+              port: 9104
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.heatmapWorker.resources | nindent 12 }}

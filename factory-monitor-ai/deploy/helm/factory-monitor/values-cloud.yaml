@@ -1,0 +1,23 @@
+# Demo overrides for the k3s load-test environment.
+# Images are expected to be pre-loaded on the node (pullPolicy: IfNotPresent).
+
+image:
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+
+ingestWorker:
+  replicas: 2
+
+escalationWorker:
+  replicas: 1
+
+notifierWorker:
+  replicas: 1
+
+heatmapWorker:
+  replicas: 1
+
+frontend:
+  replicas: 1

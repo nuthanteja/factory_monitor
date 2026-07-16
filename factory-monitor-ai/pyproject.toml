@@ -46,6 +46,10 @@ api = [
 worker = [
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
+    # psycopg2 (sync driver) is required by the make_due_collector scrape gauge,
+    # which uses a dedicated sync engine on alembic_database_url. Without it the
+    # escalation and notifier workers crash on boot registering that collector.
+    "psycopg2-binary>=2.9",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "aiokafka>=0.11",

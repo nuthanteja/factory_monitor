@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 .venv/
+.venv-cv/
 venv/
 .env
 node_modules/
@@ -13,3 +14,6 @@ build/
 edge/models/*.pt
 footage/*.mp4
 *.log
+# roboflow_infer / score_video tool outputs
+annotated.mp4
+output.jpg
